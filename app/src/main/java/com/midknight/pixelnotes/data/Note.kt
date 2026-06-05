@@ -2,6 +2,7 @@ package com.midknight.pixelnotes.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.midknight.pixelnotes.domain.StrokeData
 
 @Entity(tableName = "notes")
 data class Note(
@@ -9,5 +10,6 @@ data class Note(
     val id: Int = 0,
     val title: String,
     val content: String,
-    val date: String
+    val date: String,
+    val drawingData: List<StrokeData> = emptyList()
 )
