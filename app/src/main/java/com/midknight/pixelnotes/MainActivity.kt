@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.midknight.pixelnotes.ui.components.SideMenu
+import com.midknight.pixelnotes.ui.screens.DrawingScreen
 import com.midknight.pixelnotes.ui.screens.NotesScreen
 import com.midknight.pixelnotes.ui.screens.PlaceholderScreen
 import com.midknight.pixelnotes.ui.theme.PixelNotesTheme
@@ -38,7 +39,7 @@ class MainActivity : ComponentActivity() {
                         Surface(modifier = Modifier.weight(1f)) {
                             when (currentScreen) {
                                 0 -> NotesScreen()
-                                1 -> PlaceholderScreen(title = "Folders")
+                                1 -> DrawingScreen()
                                 2 -> PlaceholderScreen(title = "Settings")
                             }
                         }

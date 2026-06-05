@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -56,4 +57,13 @@ dependencies {
 
     implementation("androidx.compose.material3:material3-window-size-class")
     implementation("androidx.compose.material:material-icons-extended")
+
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
+}
+
+ksp {
+    arg("room.generateKotlin", "true")
 }
