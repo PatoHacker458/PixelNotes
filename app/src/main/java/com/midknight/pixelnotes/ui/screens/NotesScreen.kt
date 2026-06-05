@@ -17,16 +17,7 @@ import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.ui.components.NoteCard
 
 @Composable
-fun NotesScreen() {
-    val dummyNotes = listOf(
-        Note(title = "Pixel Notes Project", content = "Clone Samsung Notes and Google Keep with USI 2.0 support and PDF export.", date = "Jun 05"),
-        Note(title = "Shopping List", content = "Eggs, Milk, Bread, Coffee, and remote batteries.", date = "Jun 04"),
-        Note(title = "UI Ideas", content = "Use Jetpack Compose for adaptive UI on Pixel Tablet.", date = "Jun 02"),
-        Note(title = "Physics Notes", content = "Thermodynamics is the branch of physics that deals with heat, work, and temperature.", date = "May 28"),
-        Note(title = "Reading List", content = "1. Dune\n2. 1984\n3. Brave New World", date = "May 25"),
-        Note(title = "Code Review", content = "Remember to push changes to GitHub at the end of the day.", date = "May 20")
-    )
-
+fun NotesScreen(notes: List<Note>) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 220.dp),
         modifier = Modifier.fillMaxSize(),
@@ -34,7 +25,7 @@ fun NotesScreen() {
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        items(dummyNotes) { note ->
+        items(notes) { note ->
             NoteCard(note = note)
         }
     }

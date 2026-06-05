@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -17,14 +16,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import com.midknight.pixelnotes.domain.Stroke
+import com.midknight.pixelnotes.domain.PointData
+import com.midknight.pixelnotes.domain.StrokeData
 
 @Composable
-fun DrawingCanvas(modifier: Modifier = Modifier) {
-    val strokes = remember { mutableStateListOf<Stroke>() }
+fun DrawingCanvas(
+    strokes: MutableList<StrokeData>,
+    modifier: Modifier = Modifier
+) {
     var currentPath by remember { mutableStateOf<Path?>(null) }
+    var currentPoints by remember { mutableStateOf<MutableList<PointData>>(mutableListOf()) }
     var trigger by remember { mutableIntStateOf(0) }
 
     Canvas(
@@ -37,30 +40,41 @@ fun DrawingCanvas(modifier: Modifier = Modifier) {
                     val path = Path().apply {
                         moveTo(down.position.x, down.position.y)
                     }
+                    val points = mutableListOf(PointData(down.position.x, down.position.y))
+
                     currentPath = path
+                    currentPoints = points
 
                     do {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull()
                         if (change != null && change.pressed) {
                             path.lineTo(change.position.x, change.position.y)
+                            points.add(PointData(change.position.x, change.position.y))
                             trigger++
                         }
                     } while (event.changes.any { it.pressed })
 
-                    strokes.add(Stroke(path, Color.Black, 8f))
+                    strokes.add(
+                        StrokeData(
+                            points = points.toList(),
+                            colorArgb = android.graphics.Color.BLACK,
+                            strokeWidth = 8f
+                        )
+                    )
                     currentPath = null
+                    currentPoints = mutableListOf()
                 }
             }
     ) {
         trigger
 
-        strokes.forEach { stroke ->
+        strokes.forEach { strokeData ->
             drawPath(
-                path = stroke.path,
-                color = stroke.color,
-                style = DrawStroke(
-                    width = stroke.strokeWidth,
+                path = strokeData.toPath(),
+                color = Color(strokeData.colorArgb),
+                style = Stroke(
+                    width = strokeData.strokeWidth,
                     cap = StrokeCap.Round,
                     join = StrokeJoin.Round
                 )
@@ -71,7 +85,7 @@ fun DrawingCanvas(modifier: Modifier = Modifier) {
             drawPath(
                 path = path,
                 color = Color.Black,
-                style = DrawStroke(
+                style = Stroke(
                     width = 8f,
                     cap = StrokeCap.Round,
                     join = StrokeJoin.Round
