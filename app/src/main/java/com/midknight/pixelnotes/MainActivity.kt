@@ -54,6 +54,9 @@ class MainActivity : ComponentActivity() {
                                     onSaveNote = { note ->
                                         viewModel.saveNote(note)
                                         currentScreen = 0
+                                    },
+                                    onNavigateBack = {
+                                        currentScreen = 0
                                     }
                                 )
                                 2 -> PlaceholderScreen(title = "Settings")
