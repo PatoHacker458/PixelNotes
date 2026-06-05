@@ -17,7 +17,7 @@ import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.ui.components.NoteCard
 
 @Composable
-fun NotesScreen(notes: List<Note>) {
+fun NotesScreen(notes: List<Note>, onNoteClick: (Note) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 220.dp),
         modifier = Modifier.fillMaxSize(),
@@ -26,7 +26,7 @@ fun NotesScreen(notes: List<Note>) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         items(notes) { note ->
-            NoteCard(note = note)
+            NoteCard(note = note, onClick = { onNoteClick(note) })
         }
     }
 }

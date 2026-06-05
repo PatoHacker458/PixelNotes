@@ -43,8 +43,16 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DrawingScreen(onSaveNote: (Note) -> Unit, onNavigateBack: () -> Unit) {
-    val strokes = remember { mutableStateListOf<StrokeData>() }
+fun DrawingScreen(
+    noteToEdit: Note?,
+    onSaveNote: (Note) -> Unit,
+    onNavigateBack: () -> Unit
+) {
+    val strokes = remember {
+        mutableStateListOf<StrokeData>().apply {
+            noteToEdit?.drawingData?.let { addAll(it) }
+        }
+    }
     var currentColor by remember { mutableStateOf(Color.Black) }
     var currentStrokeWidth by remember { mutableFloatStateOf(8f) }
 
@@ -53,7 +61,7 @@ fun DrawingScreen(onSaveNote: (Note) -> Unit, onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("New Drawing") },
+                title = { Text(noteToEdit?.title ?: "New Drawing") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -72,14 +80,16 @@ fun DrawingScreen(onSaveNote: (Note) -> Unit, onNavigateBack: () -> Unit) {
                     }
                     IconButton(onClick = {
                         val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
-                        val newNote = Note(
+                        val noteToSave = noteToEdit?.copy(
+                            drawingData = strokes.toList(),
+                            date = currentDate
+                        ) ?: Note(
                             title = "Sketch",
                             content = "",
                             date = currentDate,
                             drawingData = strokes.toList()
                         )
-                        onSaveNote(newNote)
-                        strokes.clear()
+                        onSaveNote(noteToSave)
                     }) {
                         Icon(Icons.Filled.Save, contentDescription = "Save Note")
                     }

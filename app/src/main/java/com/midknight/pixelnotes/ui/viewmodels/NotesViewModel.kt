@@ -19,6 +19,18 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
             dao.insertNote(note)
         }
     }
+
+    fun updateNote(note: Note) {
+        viewModelScope.launch {
+            dao.updateNote(note)
+        }
+    }
+
+    fun deleteNote(note: Note) {
+        viewModelScope.launch {
+            dao.deleteNote(note)
+        }
+    }
 }
 
 class NotesViewModelFactory(private val dao: NoteDao) : ViewModelProvider.Factory {

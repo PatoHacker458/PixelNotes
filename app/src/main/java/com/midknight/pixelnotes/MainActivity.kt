@@ -10,10 +10,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.data.NoteDatabase
 import com.midknight.pixelnotes.ui.components.SideMenu
 import com.midknight.pixelnotes.ui.screens.DrawingScreen
@@ -40,22 +42,39 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     var currentScreen by remember { mutableIntStateOf(0) }
+                    var selectedNote by remember { mutableStateOf<Note?>(null) }
 
                     Row(modifier = Modifier.fillMaxSize()) {
                         SideMenu(
                             currentSelection = currentScreen,
-                            onOptionSelected = { newScreen -> currentScreen = newScreen }
+                            onOptionSelected = { newScreen ->
+                                if (newScreen == 1) selectedNote = null
+                                currentScreen = newScreen
+                            }
                         )
 
                         Surface(modifier = Modifier.weight(1f)) {
                             when (currentScreen) {
-                                0 -> NotesScreen(notes = notes)
+                                0 -> NotesScreen(
+                                    notes = notes,
+                                    onNoteClick = { note ->
+                                        selectedNote = note
+                                        currentScreen = 1
+                                    }
+                                )
                                 1 -> DrawingScreen(
+                                    noteToEdit = selectedNote,
                                     onSaveNote = { note ->
-                                        viewModel.saveNote(note)
+                                        if (note.id == 0) {
+                                            viewModel.saveNote(note)
+                                        } else {
+                                            viewModel.updateNote(note)
+                                        }
+                                        selectedNote = null
                                         currentScreen = 0
                                     },
                                     onNavigateBack = {
+                                        selectedNote = null
                                         currentScreen = 0
                                     }
                                 )
