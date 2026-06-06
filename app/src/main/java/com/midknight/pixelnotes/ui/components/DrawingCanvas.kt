@@ -61,6 +61,8 @@ fun DrawingCanvas(
                         moveTo(startX, startY)
                     }
                     val points = mutableListOf(PointData(startX, startY))
+                    var prevX = startX
+                    var prevY = startY
 
                     currentPath = path
                     currentPoints = points
@@ -79,12 +81,23 @@ fun DrawingCanvas(
                                 change.consume()
                                 val x = change.position.x / scaleRatio
                                 val y = change.position.y / scaleRatio
-                                path.lineTo(x, y)
+
+                                val midX = (prevX + x) / 2f
+                                val midY = (prevY + y) / 2f
+
+                                path.quadraticBezierTo(prevX, prevY, midX, midY)
+                                prevX = x
+                                prevY = y
+
                                 points.add(PointData(x, y))
                                 trigger++
                             }
                         }
                     } while (event.changes.any { it.pressed })
+
+                    if (!isZooming) {
+                        path.lineTo(prevX, prevY)
+                    }
 
                     if (!isZooming || points.size > 3) {
                         strokes.add(

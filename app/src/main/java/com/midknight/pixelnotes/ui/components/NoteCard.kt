@@ -38,6 +38,8 @@ fun NoteCard(
     note: Note,
     onClick: () -> Unit,
     onDeleteClick: () -> Unit,
+    onExportClick: () -> Unit,
+    onShareClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -88,12 +90,18 @@ fun NoteCard(
             ) {
                 DropdownMenuItem(
                     text = { Text("Export as PDF") },
-                    onClick = { showMenu = false },
+                    onClick = {
+                        showMenu = false
+                        onExportClick()
+                    },
                     leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null) }
                 )
                 DropdownMenuItem(
                     text = { Text("Share") },
-                    onClick = { showMenu = false },
+                    onClick = {
+                        showMenu = false
+                        onShareClick()
+                    },
                     leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
                 )
                 DropdownMenuItem(

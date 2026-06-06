@@ -16,9 +16,20 @@ data class StrokeData(
         val path = Path()
         if (points.isNotEmpty()) {
             path.moveTo(points.first().x, points.first().y)
+            var prevX = points.first().x
+            var prevY = points.first().y
+
             for (i in 1 until points.size) {
-                path.lineTo(points[i].x, points[i].y)
+                val currentX = points[i].x
+                val currentY = points[i].y
+                val midX = (prevX + currentX) / 2f
+                val midY = (prevY + currentY) / 2f
+
+                path.quadraticBezierTo(prevX, prevY, midX, midY)
+                prevX = currentX
+                prevY = currentY
             }
+            path.lineTo(prevX, prevY)
         }
         return path
     }

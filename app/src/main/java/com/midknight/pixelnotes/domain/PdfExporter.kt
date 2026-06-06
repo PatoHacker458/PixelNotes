@@ -13,8 +13,91 @@ import android.net.Uri
 import com.midknight.pixelnotes.data.Note
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 class PdfExporter(private val context: Context) {
+
+    private fun drawNoteOnPage(note: Note, pdfCanvas: Canvas, pdfWidth: Int, pdfHeight: Int) {
+        val bgPaint = Paint().apply {
+            color = android.graphics.Color.WHITE
+            style = Paint.Style.FILL
+        }
+        pdfCanvas.drawRect(0f, 0f, pdfWidth.toFloat(), pdfHeight.toFloat(), bgPaint)
+
+        if (note.backgroundUri != null) {
+            try {
+                val bgUri = Uri.parse(note.backgroundUri)
+                context.contentResolver.openInputStream(bgUri)?.use { inputStream ->
+                    val bitmap = BitmapFactory.decodeStream(inputStream)
+                    if (bitmap != null) {
+                        val targetRatio = pdfWidth.toFloat() / pdfHeight.toFloat()
+                        val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+
+                        val srcRect = if (bitmapRatio > targetRatio) {
+                            val newWidth = (bitmap.height * targetRatio).toInt()
+                            val xOffset = (bitmap.width - newWidth) / 2
+                            Rect(xOffset, 0, xOffset + newWidth, bitmap.height)
+                        } else {
+                            val newHeight = (bitmap.width / targetRatio).toInt()
+                            val yOffset = (bitmap.height - newHeight) / 2
+                            Rect(0, yOffset, bitmap.width, yOffset + newHeight)
+                        }
+                        val destRect = Rect(0, 0, pdfWidth, pdfHeight)
+                        pdfCanvas.drawBitmap(bitmap, srcRect, destRect, null)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        val strokeBitmap = Bitmap.createBitmap(pdfWidth, pdfHeight, Bitmap.Config.ARGB_8888)
+        val strokeCanvas = Canvas(strokeBitmap)
+
+        val paint = Paint().apply {
+            isAntiAlias = true
+            style = Paint.Style.STROKE
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+        }
+
+        val clearXfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+
+        note.drawingData.forEach { strokeData ->
+            if (strokeData.isEraser) {
+                paint.xfermode = clearXfermode
+                paint.color = android.graphics.Color.TRANSPARENT
+            } else {
+                paint.xfermode = null
+                paint.color = strokeData.colorArgb
+            }
+            paint.strokeWidth = strokeData.strokeWidth
+
+            val path = android.graphics.Path()
+            if (strokeData.points.isNotEmpty()) {
+                path.moveTo(strokeData.points.first().x, strokeData.points.first().y)
+                var prevX = strokeData.points.first().x
+                var prevY = strokeData.points.first().y
+
+                for (i in 1 until strokeData.points.size) {
+                    val currentX = strokeData.points[i].x
+                    val currentY = strokeData.points[i].y
+                    val midX = (prevX + currentX) / 2f
+                    val midY = (prevY + currentY) / 2f
+
+                    path.quadTo(prevX, prevY, midX, midY)
+                    prevX = currentX
+                    prevY = currentY
+                }
+                path.lineTo(prevX, prevY)
+            }
+            strokeCanvas.drawPath(path, paint)
+        }
+
+        pdfCanvas.drawBitmap(strokeBitmap, 0f, 0f, null)
+        strokeBitmap.recycle()
+    }
 
     suspend fun exportToPdf(note: Note, uri: Uri) {
         withContext(Dispatchers.IO) {
@@ -24,75 +107,8 @@ class PdfExporter(private val context: Context) {
             val document = PdfDocument()
             val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
             val page = document.startPage(pageInfo)
-            val pdfCanvas = page.canvas
 
-            val bgPaint = Paint().apply {
-                color = android.graphics.Color.WHITE
-                style = Paint.Style.FILL
-            }
-            pdfCanvas.drawRect(0f, 0f, pdfWidth.toFloat(), pdfHeight.toFloat(), bgPaint)
-
-            if (note.backgroundUri != null) {
-                try {
-                    val bgUri = Uri.parse(note.backgroundUri)
-                    context.contentResolver.openInputStream(bgUri)?.use { inputStream ->
-                        val bitmap = BitmapFactory.decodeStream(inputStream)
-                        if (bitmap != null) {
-                            val targetRatio = pdfWidth.toFloat() / pdfHeight.toFloat()
-                            val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-
-                            val srcRect = if (bitmapRatio > targetRatio) {
-                                val newWidth = (bitmap.height * targetRatio).toInt()
-                                val xOffset = (bitmap.width - newWidth) / 2
-                                Rect(xOffset, 0, xOffset + newWidth, bitmap.height)
-                            } else {
-                                val newHeight = (bitmap.width / targetRatio).toInt()
-                                val yOffset = (bitmap.height - newHeight) / 2
-                                Rect(0, yOffset, bitmap.width, yOffset + newHeight)
-                            }
-                            val destRect = Rect(0, 0, pdfWidth, pdfHeight)
-                            pdfCanvas.drawBitmap(bitmap, srcRect, destRect, null)
-                        }
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-
-            val strokeBitmap = Bitmap.createBitmap(pdfWidth, pdfHeight, Bitmap.Config.ARGB_8888)
-            val strokeCanvas = Canvas(strokeBitmap)
-
-            val paint = Paint().apply {
-                isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeJoin = Paint.Join.ROUND
-                strokeCap = Paint.Cap.ROUND
-            }
-
-            val clearXfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-
-            note.drawingData.forEach { strokeData ->
-                if (strokeData.isEraser) {
-                    paint.xfermode = clearXfermode
-                    paint.color = android.graphics.Color.TRANSPARENT
-                } else {
-                    paint.xfermode = null
-                    paint.color = strokeData.colorArgb
-                }
-                paint.strokeWidth = strokeData.strokeWidth
-
-                val path = android.graphics.Path()
-                if (strokeData.points.isNotEmpty()) {
-                    path.moveTo(strokeData.points.first().x, strokeData.points.first().y)
-                    for (i in 1 until strokeData.points.size) {
-                        path.lineTo(strokeData.points[i].x, strokeData.points[i].y)
-                    }
-                }
-                strokeCanvas.drawPath(path, paint)
-            }
-
-            pdfCanvas.drawBitmap(strokeBitmap, 0f, 0f, null)
-            strokeBitmap.recycle()
+            drawNoteOnPage(note, page.canvas, pdfWidth, pdfHeight)
 
             document.finishPage(page)
 
@@ -100,6 +116,37 @@ class PdfExporter(private val context: Context) {
                 document.writeTo(outputStream)
             }
             document.close()
+        }
+    }
+
+    suspend fun exportToSharedFile(note: Note, fileName: String): File? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val pdfDir = File(context.cacheDir, "pdfs")
+                if (!pdfDir.exists()) pdfDir.mkdirs()
+
+                val file = File(pdfDir, fileName)
+
+                val pdfWidth = 1080
+                val pdfHeight = 1527
+
+                val document = PdfDocument()
+                val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
+                val page = document.startPage(pageInfo)
+
+                drawNoteOnPage(note, page.canvas, pdfWidth, pdfHeight)
+
+                document.finishPage(page)
+
+                FileOutputStream(file).use { outputStream ->
+                    document.writeTo(outputStream)
+                }
+                document.close()
+                file
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
         }
     }
 }
