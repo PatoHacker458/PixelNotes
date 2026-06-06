@@ -70,6 +70,7 @@ fun DrawingCanvas(
                         if (!isZooming) {
                             val change = event.changes.firstOrNull { it.id == down.id }
                             if (change != null && change.pressed) {
+                                change.consume()
                                 val x = change.position.x / scaleRatio
                                 val y = change.position.y / scaleRatio
                                 path.lineTo(x, y)

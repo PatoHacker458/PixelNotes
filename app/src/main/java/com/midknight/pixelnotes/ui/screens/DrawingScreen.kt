@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -73,14 +74,6 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     val coroutineScope = rememberCoroutineScope()
 
     val colors = listOf(Color.Black, Color.Red, Color.Blue, Color.Green, Color(0xFFFBC02D), Color.White)
-
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-
-    val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
-        scale = (scale * zoomChange).coerceIn(1f, 5f)
-        offset += offsetChange
-    }
 
     val pdfLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/pdf")
@@ -210,7 +203,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             }
         }
     ) { paddingValues ->
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .padding(paddingValues)
                 .fillMaxSize()
@@ -218,6 +211,24 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 .clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
+            val maxWidthPx = constraints.maxWidth.toFloat()
+            val maxHeightPx = constraints.maxHeight.toFloat()
+
+            var scale by remember { mutableFloatStateOf(1f) }
+            var offset by remember { mutableStateOf(Offset.Zero) }
+
+            val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
+                scale = (scale * zoomChange).coerceIn(1f, 5f)
+
+                val maxX = (maxWidthPx * (scale - 1f)) / 2f
+                val maxY = (maxHeightPx * (scale - 1f)) / 2f
+
+                offset = Offset(
+                    x = (offset.x + offsetChange.x).coerceIn(-maxX, maxX),
+                    y = (offset.y + offsetChange.y).coerceIn(-maxY, maxY)
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxHeight(0.95f)
