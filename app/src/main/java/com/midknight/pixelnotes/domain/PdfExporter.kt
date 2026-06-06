@@ -1,7 +1,13 @@
 package com.midknight.pixelnotes.domain
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import com.midknight.pixelnotes.data.Note
@@ -18,13 +24,43 @@ class PdfExporter(private val context: Context) {
             val document = PdfDocument()
             val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
             val page = document.startPage(pageInfo)
-            val canvas = page.canvas
+            val pdfCanvas = page.canvas
 
             val bgPaint = Paint().apply {
                 color = android.graphics.Color.WHITE
                 style = Paint.Style.FILL
             }
-            canvas.drawRect(0f, 0f, pdfWidth.toFloat(), pdfHeight.toFloat(), bgPaint)
+            pdfCanvas.drawRect(0f, 0f, pdfWidth.toFloat(), pdfHeight.toFloat(), bgPaint)
+
+            if (note.backgroundUri != null) {
+                try {
+                    val bgUri = Uri.parse(note.backgroundUri)
+                    context.contentResolver.openInputStream(bgUri)?.use { inputStream ->
+                        val bitmap = BitmapFactory.decodeStream(inputStream)
+                        if (bitmap != null) {
+                            val targetRatio = pdfWidth.toFloat() / pdfHeight.toFloat()
+                            val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+
+                            val srcRect = if (bitmapRatio > targetRatio) {
+                                val newWidth = (bitmap.height * targetRatio).toInt()
+                                val xOffset = (bitmap.width - newWidth) / 2
+                                Rect(xOffset, 0, xOffset + newWidth, bitmap.height)
+                            } else {
+                                val newHeight = (bitmap.width / targetRatio).toInt()
+                                val yOffset = (bitmap.height - newHeight) / 2
+                                Rect(0, yOffset, bitmap.width, yOffset + newHeight)
+                            }
+                            val destRect = Rect(0, 0, pdfWidth, pdfHeight)
+                            pdfCanvas.drawBitmap(bitmap, srcRect, destRect, null)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            val strokeBitmap = Bitmap.createBitmap(pdfWidth, pdfHeight, Bitmap.Config.ARGB_8888)
+            val strokeCanvas = Canvas(strokeBitmap)
 
             val paint = Paint().apply {
                 isAntiAlias = true
@@ -33,10 +69,14 @@ class PdfExporter(private val context: Context) {
                 strokeCap = Paint.Cap.ROUND
             }
 
+            val clearXfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+
             note.drawingData.forEach { strokeData ->
                 if (strokeData.isEraser) {
-                    paint.color = android.graphics.Color.WHITE
+                    paint.xfermode = clearXfermode
+                    paint.color = android.graphics.Color.TRANSPARENT
                 } else {
+                    paint.xfermode = null
                     paint.color = strokeData.colorArgb
                 }
                 paint.strokeWidth = strokeData.strokeWidth
@@ -48,8 +88,11 @@ class PdfExporter(private val context: Context) {
                         path.lineTo(strokeData.points[i].x, strokeData.points[i].y)
                     }
                 }
-                canvas.drawPath(path, paint)
+                strokeCanvas.drawPath(path, paint)
             }
+
+            pdfCanvas.drawBitmap(strokeBitmap, 0f, 0f, null)
+            strokeBitmap.recycle()
 
             document.finishPage(page)
 
