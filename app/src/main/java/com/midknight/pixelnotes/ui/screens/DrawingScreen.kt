@@ -222,12 +222,12 @@ fun DrawingScreen(viewModel: NotesViewModel) {
 
             val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
                 if (gestureIntent == "none") {
-                    val zoomDelta = abs(zoomChange - 1f) * 500f
+                    val zoomDelta = abs(zoomChange - 1f) * 300f
                     val panDelta = offsetChange.getDistance()
 
-                    if (panDelta > 5f && panDelta > zoomDelta) {
+                    if (panDelta > 3f && panDelta > zoomDelta) {
                         gestureIntent = "pan"
-                    } else if (zoomDelta > 5f) {
+                    } else if (zoomDelta > 3f) {
                         gestureIntent = "zoom"
                     }
                 }
@@ -239,9 +239,11 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 val maxX = (maxWidthPx * (scale - 1f)) / 2f
                 val maxY = (maxHeightPx * (scale - 1f)) / 2f
 
+                val panMultiplier = 2.0f
+
                 offset = Offset(
-                    x = (offset.x + offsetChange.x).coerceIn(-maxX, maxX),
-                    y = (offset.y + offsetChange.y).coerceIn(-maxY, maxY)
+                    x = (offset.x + (offsetChange.x * panMultiplier)).coerceIn(-maxX, maxX),
+                    y = (offset.y + (offsetChange.y * panMultiplier)).coerceIn(-maxY, maxY)
                 )
             }
 
