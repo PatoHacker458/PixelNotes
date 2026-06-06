@@ -16,6 +16,9 @@ import com.midknight.pixelnotes.domain.StrokeData
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
@@ -51,6 +54,11 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     }
 
     fun closeEditing() {
+        if (!(selectedNote == null && currentStrokes.isEmpty() && currentBackgroundUri == null && currentTitle == "New Note")) {
+            val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
+            saveCurrentNote(currentDate)
+        }
+
         selectedNote = null
         currentStrokes.clear()
         currentBackgroundUri = null
@@ -73,12 +81,13 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
         viewModelScope.launch {
             if (note.id == 0) {
-                dao.insertNote(note)
+                val newId = dao.insertNote(note)
+                selectedNote = note.copy(id = newId.toInt())
             } else {
                 dao.updateNote(note)
+                selectedNote = note
             }
         }
-        closeEditing()
     }
 
     fun deleteNote(note: Note) {

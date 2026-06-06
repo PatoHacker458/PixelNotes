@@ -62,7 +62,7 @@ fun NotesScreen(
             NoteCard(
                 note = note,
                 onClick = { onNoteClick(note) },
-                onLongClick = { noteToDelete = note }
+                onDeleteClick = { noteToDelete = note }
             )
         }
     }

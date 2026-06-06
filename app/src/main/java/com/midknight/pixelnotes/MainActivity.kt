@@ -1,7 +1,9 @@
 package com.midknight.pixelnotes
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +13,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.midknight.pixelnotes.data.NoteDatabase
 import com.midknight.pixelnotes.ui.components.SideMenu
@@ -32,6 +35,19 @@ class MainActivity : ComponentActivity() {
             PixelNotesTheme {
                 val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(dao))
                 val notes by viewModel.notes.collectAsState()
+                val context = LocalContext.current
+
+                BackHandler(enabled = viewModel.currentScreen != 0) {
+                    if (viewModel.currentScreen == 1) {
+                        val isBlank = viewModel.selectedNote == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note"
+                        if (!isBlank) {
+                            Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
+                        }
+                        viewModel.closeEditing()
+                    } else {
+                        viewModel.currentScreen = 0
+                    }
+                }
 
                 Surface(
                     modifier = Modifier.fillMaxSize().systemBarsPadding(),
@@ -41,8 +57,19 @@ class MainActivity : ComponentActivity() {
                         SideMenu(
                             currentSelection = viewModel.currentScreen,
                             onOptionSelected = { newScreen ->
-                                if (newScreen == 1) viewModel.openNoteForEditing(null)
-                                else viewModel.currentScreen = newScreen
+                                if (viewModel.currentScreen == 1 && newScreen != 1) {
+                                    val isBlank = viewModel.selectedNote == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note"
+                                    if (!isBlank) {
+                                        Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
+                                    }
+                                    viewModel.closeEditing()
+                                }
+
+                                if (newScreen == 1 && viewModel.currentScreen != 1) {
+                                    viewModel.openNoteForEditing(null)
+                                } else if (newScreen != 1) {
+                                    viewModel.currentScreen = newScreen
+                                }
                             }
                         )
 

@@ -1,6 +1,7 @@
 package com.midknight.pixelnotes.ui.screens
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +41,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -59,6 +61,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.domain.PdfExporter
@@ -75,6 +80,24 @@ import kotlin.math.abs
 fun DrawingScreen(viewModel: NotesViewModel) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                val isBlank = viewModel.selectedNote == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note"
+                if (!isBlank) {
+                    val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
+                    viewModel.saveCurrentNote(currentDate)
+                    Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val colors = listOf(Color.Black, Color.Red, Color.Blue, Color.Green, Color(0xFFFBC02D))
 
@@ -127,7 +150,13 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { viewModel.closeEditing() }) {
+                    IconButton(onClick = {
+                        val isBlank = viewModel.selectedNote == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note"
+                        if (!isBlank) {
+                            Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
+                        }
+                        viewModel.closeEditing()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -162,6 +191,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     IconButton(onClick = {
                         val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
                         viewModel.saveCurrentNote(currentDate)
+                        Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Filled.Save, contentDescription = "Save Note")
                     }
