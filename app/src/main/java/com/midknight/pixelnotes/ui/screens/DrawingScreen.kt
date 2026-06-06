@@ -40,6 +40,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -216,9 +218,23 @@ fun DrawingScreen(viewModel: NotesViewModel) {
 
             var scale by remember { mutableFloatStateOf(1f) }
             var offset by remember { mutableStateOf(Offset.Zero) }
+            var gestureIntent by remember { mutableStateOf("none") }
 
             val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
-                scale = (scale * zoomChange).coerceIn(1f, 5f)
+                if (gestureIntent == "none") {
+                    val zoomDelta = abs(zoomChange - 1f) * 500f
+                    val panDelta = offsetChange.getDistance()
+
+                    if (panDelta > 5f && panDelta > zoomDelta) {
+                        gestureIntent = "pan"
+                    } else if (zoomDelta > 5f) {
+                        gestureIntent = "zoom"
+                    }
+                }
+
+                if (gestureIntent != "pan") {
+                    scale = (scale * zoomChange).coerceIn(1f, 5f)
+                }
 
                 val maxX = (maxWidthPx * (scale - 1f)) / 2f
                 val maxY = (maxHeightPx * (scale - 1f)) / 2f
@@ -227,6 +243,12 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     x = (offset.x + offsetChange.x).coerceIn(-maxX, maxX),
                     y = (offset.y + offsetChange.y).coerceIn(-maxY, maxY)
                 )
+            }
+
+            LaunchedEffect(transformState.isTransformInProgress) {
+                if (!transformState.isTransformInProgress) {
+                    gestureIntent = "none"
+                }
             }
 
             Box(
