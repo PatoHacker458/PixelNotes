@@ -23,16 +23,18 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import com.midknight.pixelnotes.domain.PointData
 import com.midknight.pixelnotes.domain.StrokeData
 
 @Composable
 fun DrawingCanvas(
-    strokes: MutableList<StrokeData>,
+    strokes: List<StrokeData>,
     currentColor: Color,
     currentStrokeWidth: Float,
     isEraserMode: Boolean,
+    onStrokeAdd: (StrokeData) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var currentPath by remember { mutableStateOf<Path?>(null) }
@@ -49,23 +51,30 @@ fun DrawingCanvas(
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .pointerInput(Unit) {
                 val virtualWidth = 1080f
+                var stylusModeActive = false
 
                 awaitEachGesture {
                     val down = awaitFirstDown()
                     val scaleRatio = size.width.toFloat() / virtualWidth
 
+                    if (down.type == PointerType.Stylus || down.type == PointerType.Eraser) {
+                        stylusModeActive = true
+                    }
+
+                    val isAllowedTouch = !stylusModeActive || (down.type == PointerType.Stylus || down.type == PointerType.Eraser)
+
                     val startX = down.position.x / scaleRatio
                     val startY = down.position.y / scaleRatio
 
-                    val path = Path().apply {
-                        moveTo(startX, startY)
-                    }
+                    val path = Path().apply { moveTo(startX, startY) }
                     val points = mutableListOf(PointData(startX, startY))
                     var prevX = startX
                     var prevY = startY
 
-                    currentPath = path
-                    currentPoints = points
+                    if (isAllowedTouch) {
+                        currentPath = path
+                        currentPoints = points
+                    }
 
                     var isZooming = false
 
@@ -75,7 +84,7 @@ fun DrawingCanvas(
                             isZooming = true
                         }
 
-                        if (!isZooming) {
+                        if (!isZooming && isAllowedTouch) {
                             val change = event.changes.firstOrNull { it.id == down.id }
                             if (change != null && change.pressed) {
                                 change.consume()
@@ -95,17 +104,17 @@ fun DrawingCanvas(
                         }
                     } while (event.changes.any { it.pressed })
 
-                    if (!isZooming) {
+                    if (!isZooming && isAllowedTouch) {
                         path.lineTo(prevX, prevY)
                     }
 
-                    if (!isZooming || points.size > 3) {
-                        strokes.add(
+                    if ((!isZooming || points.size > 3) && isAllowedTouch) {
+                        onStrokeAdd(
                             StrokeData(
                                 points = points.toList(),
                                 colorArgb = updatedColor.toArgb(),
                                 strokeWidth = updatedStrokeWidth,
-                                isEraser = updatedIsEraser
+                                isEraser = updatedIsEraser || down.type == PointerType.Eraser
                             )
                         )
                     }
@@ -115,7 +124,6 @@ fun DrawingCanvas(
             }
     ) {
         trigger
-
         val virtualWidth = 1080f
         val scaleRatio = size.width / virtualWidth
 
@@ -126,11 +134,7 @@ fun DrawingCanvas(
                 drawPath(
                     path = strokeData.toPath(),
                     color = if (strokeData.isEraser) Color.Transparent else Color(strokeData.colorArgb),
-                    style = Stroke(
-                        width = strokeData.strokeWidth,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
-                    ),
+                    style = Stroke(width = strokeData.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round),
                     blendMode = if (strokeData.isEraser) BlendMode.Clear else BlendMode.SrcOver
                 )
             }
@@ -139,11 +143,7 @@ fun DrawingCanvas(
                 drawPath(
                     path = path,
                     color = if (updatedIsEraser) Color.Transparent else updatedColor,
-                    style = Stroke(
-                        width = updatedStrokeWidth,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
-                    ),
+                    style = Stroke(width = updatedStrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round),
                     blendMode = if (updatedIsEraser) BlendMode.Clear else BlendMode.SrcOver
                 )
             }

@@ -30,19 +30,40 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentScreen by mutableIntStateOf(0)
     var selectedNote by mutableStateOf<Note?>(null)
 
-    // Editor State
     var currentTitle by mutableStateOf("New Note")
     val currentStrokes = mutableStateListOf<StrokeData>()
+    val redoStrokes = mutableStateListOf<StrokeData>()
     var currentBackgroundUri by mutableStateOf<String?>(null)
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
     var isEraserMode by mutableStateOf(false)
 
-    // Bulk Selection State
     val selectedNotes = mutableStateListOf<Note>()
     var showDeleteDialog by mutableStateOf(false)
     var showMoveDialog by mutableStateOf(false)
     var showShareDialog by mutableStateOf(false)
+
+    fun addStroke(stroke: StrokeData) {
+        currentStrokes.add(stroke)
+        redoStrokes.clear()
+    }
+
+    fun undoStroke() {
+        if (currentStrokes.isNotEmpty()) {
+            redoStrokes.add(currentStrokes.removeAt(currentStrokes.lastIndex))
+        }
+    }
+
+    fun redoStroke() {
+        if (redoStrokes.isNotEmpty()) {
+            currentStrokes.add(redoStrokes.removeAt(redoStrokes.lastIndex))
+        }
+    }
+
+    fun clearCanvas() {
+        currentStrokes.clear()
+        redoStrokes.clear()
+    }
 
     fun toggleSelection(note: Note) {
         if (selectedNotes.any { it.id == note.id }) {
@@ -102,6 +123,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun openNoteForEditing(note: Note?) {
         selectedNote = note
         currentStrokes.clear()
+        redoStrokes.clear()
         currentColor = Color.Black
         currentStrokeWidth = 8f
         isEraserMode = false

@@ -72,6 +72,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.Undo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -160,12 +163,9 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 },
                 actions = {
                     IconButton(onClick = {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    }) {
-                        Icon(Icons.Filled.Image, contentDescription = "Add Background")
-                    }
+                        photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }) { Icon(Icons.Filled.Image, contentDescription = "Add Background") }
+
                     IconButton(
                         onClick = {
                             val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
@@ -173,26 +173,28 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             pdfLauncher.launch(fileName)
                         },
                         enabled = viewModel.currentStrokes.isNotEmpty()
-                    ) {
-                        Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
-                    }
+                    ) { Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF") }
+
                     IconButton(
-                        onClick = {
-                            if (viewModel.currentStrokes.isNotEmpty()) {
-                                viewModel.currentStrokes.removeAt(viewModel.currentStrokes.lastIndex)
-                            }
-                        },
+                        onClick = { viewModel.undoStroke() },
                         enabled = viewModel.currentStrokes.isNotEmpty()
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
-                    }
+                    ) { Icon(Icons.Filled.Undo, contentDescription = "Undo") }
+
+                    IconButton(
+                        onClick = { viewModel.redoStroke() },
+                        enabled = viewModel.redoStrokes.isNotEmpty()
+                    ) { Icon(Icons.Filled.Redo, contentDescription = "Redo") }
+
+                    IconButton(
+                        onClick = { viewModel.clearCanvas() },
+                        enabled = viewModel.currentStrokes.isNotEmpty()
+                    ) { Icon(Icons.Filled.DeleteSweep, contentDescription = "Clear Canvas") }
+
                     IconButton(onClick = {
                         val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
                         viewModel.saveCurrentNote(currentDate)
                         Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Filled.Save, contentDescription = "Save Note")
-                    }
+                    }) { Icon(Icons.Filled.Save, contentDescription = "Save Note") }
                 }
             )
         },
@@ -333,6 +335,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         currentColor = viewModel.currentColor,
                         currentStrokeWidth = viewModel.currentStrokeWidth,
                         isEraserMode = viewModel.isEraserMode,
+                        onStrokeAdd = { viewModel.addStroke(it) },
                         modifier = Modifier.fillMaxSize()
                     )
                 }
