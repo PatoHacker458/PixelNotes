@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.midknight.pixelnotes.data.FolderEntity
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.data.NoteDao
 import com.midknight.pixelnotes.domain.StrokeData
@@ -25,7 +26,9 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     val notes = dao.getAllNotes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val folders = listOf("Todas", "General", "Trabajo", "Escuela", "Personal")
+    val folders = dao.getAllFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     var currentFolderFilter by mutableStateOf("Todas")
 
     var currentScreen by mutableIntStateOf(0)
@@ -37,6 +40,13 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
     var isEraserMode by mutableStateOf(false)
+
+    fun createFolder(name: String, parentPath: String?) {
+        val path = if (parentPath == null) name else "$parentPath/$name"
+        viewModelScope.launch {
+            dao.insertFolder(FolderEntity(path = path, name = name, parentPath = parentPath))
+        }
+    }
 
     fun openNoteForEditing(note: Note?) {
         selectedNote = note

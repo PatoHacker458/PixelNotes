@@ -41,6 +41,7 @@ import androidx.core.content.FileProvider
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.domain.PdfExporter
 import com.midknight.pixelnotes.ui.components.NoteCard
+import com.midknight.pixelnotes.data.FolderEntity
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -50,7 +51,7 @@ import java.util.Locale
 @Composable
 fun NotesScreen(
     notes: List<Note>,
-    folders: List<String>,
+    folders: List<FolderEntity>,
     currentFolder: String,
     onNoteClick: (Note?) -> Unit,
     onDeleteNote: (Note) -> Unit,
@@ -100,7 +101,7 @@ fun NotesScreen(
 
     if (noteToMove != null) {
         var expanded by remember { mutableStateOf(false) }
-        val availableFolders = folders.filter { it != "Todas" }
+        val availableFolders = folders.map { it.path }
         var selectedFolder by remember { mutableStateOf(availableFolders.first()) }
 
         AlertDialog(

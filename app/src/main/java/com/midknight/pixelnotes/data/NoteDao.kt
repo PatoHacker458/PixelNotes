@@ -21,4 +21,13 @@ interface NoteDao {
 
     @Delete
     suspend fun deleteNote(note: Note): Int
+
+    @Query("SELECT * FROM folders ORDER BY path ASC")
+    fun getAllFolders(): Flow<List<FolderEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFolder(folder: FolderEntity): Long
+
+    @Delete
+    suspend fun deleteFolder(folder: FolderEntity): Int
 }

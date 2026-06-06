@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
             PixelNotesTheme {
                 val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(dao))
                 val notes by viewModel.notes.collectAsState()
+                val folders by viewModel.folders.collectAsState()
                 val context = LocalContext.current
 
                 BackHandler(enabled = viewModel.currentScreen != 0) {
@@ -54,17 +55,19 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     Row(modifier = Modifier.fillMaxSize()) {
-                        // El menú desaparece si estás en la pantalla de dibujo (1)
                         if (viewModel.currentScreen != 1) {
                             SideMenu(
                                 currentFolder = viewModel.currentFolderFilter,
-                                folders = viewModel.folders,
+                                folders = folders,
                                 onFolderSelected = { folder ->
                                     viewModel.currentFolderFilter = folder
                                     viewModel.currentScreen = 0
                                 },
                                 onSettingsSelected = {
                                     viewModel.currentScreen = 2
+                                },
+                                onCreateFolder = { name, parent ->
+                                    viewModel.createFolder(name, parent)
                                 }
                             )
                         }
@@ -73,7 +76,7 @@ class MainActivity : ComponentActivity() {
                             when (viewModel.currentScreen) {
                                 0 -> NotesScreen(
                                     notes = notes,
-                                    folders = viewModel.folders,
+                                    folders = folders,
                                     currentFolder = viewModel.currentFolderFilter,
                                     onNoteClick = { note ->
                                         viewModel.openNoteForEditing(note)

@@ -49,14 +49,14 @@ fun NoteCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(32.dp)) // Expressive curve
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { showMenu = true }
             ),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f) // Glassmorphism
         )
     ) {
         Box {
