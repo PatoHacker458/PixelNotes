@@ -1,6 +1,8 @@
 package com.midknight.pixelnotes.ui.screens
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,10 +18,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -41,8 +44,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.domain.PdfExporter
 import com.midknight.pixelnotes.domain.StrokeData
@@ -67,6 +72,7 @@ fun DrawingScreen(
             noteToEdit?.drawingData?.let { addAll(it) }
         }
     }
+    var backgroundUri by remember { mutableStateOf(noteToEdit?.backgroundUri) }
     var currentColor by remember { mutableStateOf(Color.Black) }
     var currentStrokeWidth by remember { mutableFloatStateOf(8f) }
 
@@ -78,14 +84,28 @@ fun DrawingScreen(
         uri?.let {
             coroutineScope.launch {
                 val exporter = PdfExporter(context)
-                val noteToExport = noteToEdit?.copy(drawingData = strokes.toList()) ?: Note(
+                val noteToExport = noteToEdit?.copy(
+                    drawingData = strokes.toList(),
+                    backgroundUri = backgroundUri
+                ) ?: Note(
                     title = "Export",
                     content = "",
                     date = "",
-                    drawingData = strokes.toList()
+                    drawingData = strokes.toList(),
+                    backgroundUri = backgroundUri
                 )
                 exporter.exportToPdf(noteToExport, it)
             }
+        }
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let {
+            val flag = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(it, flag)
+            backgroundUri = it.toString()
         }
     }
 
@@ -95,10 +115,17 @@ fun DrawingScreen(
                 title = { Text(noteToEdit?.title ?: "New Drawing") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    }) {
+                        Icon(Icons.Filled.Image, contentDescription = "Add Background")
+                    }
                     IconButton(
                         onClick = {
                             val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
@@ -112,23 +139,23 @@ fun DrawingScreen(
                     IconButton(
                         onClick = {
                             if (strokes.isNotEmpty()) {
-                                strokes.removeLast()
+                                strokes.removeAt(strokes.lastIndex)
                             }
                         },
                         enabled = strokes.isNotEmpty()
-                    ) {
-                        Icon(Icons.Filled.Undo, contentDescription = "Undo")
-                    }
+                    ) { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo") }
                     IconButton(onClick = {
                         val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
                         val noteToSave = noteToEdit?.copy(
                             drawingData = strokes.toList(),
+                            backgroundUri = backgroundUri,
                             date = currentDate
                         ) ?: Note(
                             title = "Sketch",
                             content = "",
                             date = currentDate,
-                            drawingData = strokes.toList()
+                            drawingData = strokes.toList(),
+                            backgroundUri = backgroundUri
                         )
                         onSaveNote(noteToSave)
                     }) {
@@ -182,16 +209,28 @@ fun DrawingScreen(
                 .background(Color(0xFFE0E0E0)),
             contentAlignment = Alignment.Center
         ) {
-            DrawingCanvas(
-                strokes = strokes,
-                currentColor = currentColor,
-                currentStrokeWidth = currentStrokeWidth,
+            Box(
                 modifier = Modifier
                     .fillMaxHeight(0.95f)
                     .aspectRatio(1f / 1.414f)
                     .shadow(8.dp)
                     .background(Color.White)
-            )
+            ) {
+                backgroundUri?.let { uri ->
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = "Background Template",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                DrawingCanvas(
+                    strokes = strokes,
+                    currentColor = currentColor,
+                    currentStrokeWidth = currentStrokeWidth,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }

@@ -1,7 +1,6 @@
 package com.midknight.pixelnotes.ui.components
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,7 +39,6 @@ fun DrawingCanvas(
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.White)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
