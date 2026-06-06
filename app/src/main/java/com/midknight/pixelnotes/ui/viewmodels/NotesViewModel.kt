@@ -1,10 +1,18 @@
 package com.midknight.pixelnotes.ui.viewmodels
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.data.NoteDao
+import com.midknight.pixelnotes.domain.StrokeData
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -14,22 +22,61 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     val notes = dao.getAllNotes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun saveNote(note: Note) {
-        viewModelScope.launch {
-            dao.insertNote(note)
+    var currentScreen by mutableIntStateOf(0)
+    var selectedNote by mutableStateOf<Note?>(null)
+
+    var currentTitle by mutableStateOf("New Note")
+    val currentStrokes = mutableStateListOf<StrokeData>()
+    var currentBackgroundUri by mutableStateOf<String?>(null)
+    var currentColor by mutableStateOf(Color.Black)
+    var currentStrokeWidth by mutableFloatStateOf(8f)
+
+    fun openNoteForEditing(note: Note?) {
+        selectedNote = note
+        currentStrokes.clear()
+        currentColor = Color.Black
+        currentStrokeWidth = 8f
+
+        if (note != null) {
+            currentTitle = note.title
+            currentStrokes.addAll(note.drawingData)
+            currentBackgroundUri = note.backgroundUri
+        } else {
+            currentTitle = "New Note"
+            currentBackgroundUri = null
         }
+        currentScreen = 1
     }
 
-    fun updateNote(note: Note) {
-        viewModelScope.launch {
-            dao.updateNote(note)
-        }
+    fun closeEditing() {
+        selectedNote = null
+        currentStrokes.clear()
+        currentBackgroundUri = null
+        currentScreen = 0
     }
 
-    fun deleteNote(note: Note) {
+    fun saveCurrentNote(date: String) {
+        val note = selectedNote?.copy(
+            title = currentTitle,
+            drawingData = currentStrokes.toList(),
+            backgroundUri = currentBackgroundUri,
+            date = date
+        ) ?: Note(
+            title = currentTitle,
+            content = "",
+            date = date,
+            drawingData = currentStrokes.toList(),
+            backgroundUri = currentBackgroundUri
+        )
+
         viewModelScope.launch {
-            dao.deleteNote(note)
+            if (note.id == 0) {
+                dao.insertNote(note)
+            } else {
+                dao.updateNote(note)
+            }
         }
+        closeEditing()
     }
 }
 

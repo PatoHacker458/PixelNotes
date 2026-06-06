@@ -18,27 +18,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,8 +47,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.domain.PdfExporter
-import com.midknight.pixelnotes.domain.StrokeData
 import com.midknight.pixelnotes.ui.components.DrawingCanvas
+import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,22 +56,9 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DrawingScreen(
-    noteToEdit: Note?,
-    onSaveNote: (Note) -> Unit,
-    onNavigateBack: () -> Unit
-) {
+fun DrawingScreen(viewModel: NotesViewModel) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-
-    val strokes = remember {
-        mutableStateListOf<StrokeData>().apply {
-            noteToEdit?.drawingData?.let { addAll(it) }
-        }
-    }
-    var backgroundUri by remember { mutableStateOf(noteToEdit?.backgroundUri) }
-    var currentColor by remember { mutableStateOf(Color.Black) }
-    var currentStrokeWidth by remember { mutableFloatStateOf(8f) }
 
     val colors = listOf(Color.Black, Color.Red, Color.Blue, Color.Green, Color(0xFFFBC02D), Color.White)
 
@@ -84,15 +68,16 @@ fun DrawingScreen(
         uri?.let {
             coroutineScope.launch {
                 val exporter = PdfExporter(context)
-                val noteToExport = noteToEdit?.copy(
-                    drawingData = strokes.toList(),
-                    backgroundUri = backgroundUri
+                val noteToExport = viewModel.selectedNote?.copy(
+                    title = viewModel.currentTitle,
+                    drawingData = viewModel.currentStrokes.toList(),
+                    backgroundUri = viewModel.currentBackgroundUri
                 ) ?: Note(
-                    title = "Export",
+                    title = viewModel.currentTitle,
                     content = "",
                     date = "",
-                    drawingData = strokes.toList(),
-                    backgroundUri = backgroundUri
+                    drawingData = viewModel.currentStrokes.toList(),
+                    backgroundUri = viewModel.currentBackgroundUri
                 )
                 exporter.exportToPdf(noteToExport, it)
             }
@@ -105,17 +90,29 @@ fun DrawingScreen(
         uri?.let {
             val flag = Intent.FLAG_GRANT_READ_URI_PERMISSION
             context.contentResolver.takePersistableUriPermission(it, flag)
-            backgroundUri = it.toString()
+            viewModel.currentBackgroundUri = it.toString()
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(noteToEdit?.title ?: "New Drawing") },
+                title = {
+                    TextField(
+                        value = viewModel.currentTitle,
+                        onValueChange = { viewModel.currentTitle = it },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        ),
+                        textStyle = MaterialTheme.typography.titleLarge
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = { viewModel.closeEditing() }) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -129,35 +126,26 @@ fun DrawingScreen(
                     IconButton(
                         onClick = {
                             val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
-                            val fileName = "PixelNotes_$currentDate.pdf"
+                            val fileName = "${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf"
                             pdfLauncher.launch(fileName)
                         },
-                        enabled = strokes.isNotEmpty()
+                        enabled = viewModel.currentStrokes.isNotEmpty()
                     ) {
                         Icon(Icons.Filled.PictureAsPdf, contentDescription = "Export PDF")
                     }
                     IconButton(
                         onClick = {
-                            if (strokes.isNotEmpty()) {
-                                strokes.removeAt(strokes.lastIndex)
+                            if (viewModel.currentStrokes.isNotEmpty()) {
+                                viewModel.currentStrokes.removeAt(viewModel.currentStrokes.lastIndex)
                             }
                         },
-                        enabled = strokes.isNotEmpty()
-                    ) { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo") }
+                        enabled = viewModel.currentStrokes.isNotEmpty()
+                    ) {
+                        Icon(Icons.Filled.Undo, contentDescription = "Undo")
+                    }
                     IconButton(onClick = {
                         val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
-                        val noteToSave = noteToEdit?.copy(
-                            drawingData = strokes.toList(),
-                            backgroundUri = backgroundUri,
-                            date = currentDate
-                        ) ?: Note(
-                            title = "Sketch",
-                            content = "",
-                            date = currentDate,
-                            drawingData = strokes.toList(),
-                            backgroundUri = backgroundUri
-                        )
-                        onSaveNote(noteToSave)
+                        viewModel.saveCurrentNote(currentDate)
                     }) {
                         Icon(Icons.Filled.Save, contentDescription = "Save Note")
                     }
@@ -181,18 +169,18 @@ fun DrawingScreen(
                                     .clip(CircleShape)
                                     .background(color)
                                     .border(
-                                        width = if (currentColor == color) 2.dp else 1.dp,
+                                        width = if (viewModel.currentColor == color) 2.dp else 1.dp,
                                         color = if (color == Color.White) Color.Gray else Color.Transparent,
                                         shape = CircleShape
                                     )
-                                    .clickable { currentColor = color }
+                                    .clickable { viewModel.currentColor = color }
                             )
                         }
                     }
 
                     Slider(
-                        value = currentStrokeWidth,
-                        onValueChange = { currentStrokeWidth = it },
+                        value = viewModel.currentStrokeWidth,
+                        onValueChange = { viewModel.currentStrokeWidth = it },
                         valueRange = 2f..30f,
                         modifier = Modifier
                             .weight(1f)
@@ -216,7 +204,7 @@ fun DrawingScreen(
                     .shadow(8.dp)
                     .background(Color.White)
             ) {
-                backgroundUri?.let { uri ->
+                viewModel.currentBackgroundUri?.let { uri ->
                     AsyncImage(
                         model = uri,
                         contentDescription = "Background Template",
@@ -225,9 +213,9 @@ fun DrawingScreen(
                     )
                 }
                 DrawingCanvas(
-                    strokes = strokes,
-                    currentColor = currentColor,
-                    currentStrokeWidth = currentStrokeWidth,
+                    strokes = viewModel.currentStrokes,
+                    currentColor = viewModel.currentColor,
+                    currentStrokeWidth = viewModel.currentStrokeWidth,
                     modifier = Modifier.fillMaxSize()
                 )
             }
