@@ -99,18 +99,18 @@ class PdfExporter(private val context: Context) {
         strokeBitmap.recycle()
     }
 
-    suspend fun exportToPdf(note: Note, uri: Uri) {
+    suspend fun exportToPdf(notes: List<Note>, uri: Uri) {
         withContext(Dispatchers.IO) {
             val pdfWidth = 1080
             val pdfHeight = 1527
-
             val document = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
-            val page = document.startPage(pageInfo)
 
-            drawNoteOnPage(note, page.canvas, pdfWidth, pdfHeight)
-
-            document.finishPage(page)
+            notes.forEachIndexed { index, note ->
+                val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, index + 1).create()
+                val page = document.startPage(pageInfo)
+                drawNoteOnPage(note, page.canvas, pdfWidth, pdfHeight)
+                document.finishPage(page)
+            }
 
             context.contentResolver.openOutputStream(uri)?.use { outputStream ->
                 document.writeTo(outputStream)
@@ -119,24 +119,23 @@ class PdfExporter(private val context: Context) {
         }
     }
 
-    suspend fun exportToSharedFile(note: Note, fileName: String): File? {
+    suspend fun exportToSharedFile(notes: List<Note>, fileName: String): File? {
         return withContext(Dispatchers.IO) {
             try {
                 val pdfDir = File(context.cacheDir, "pdfs")
                 if (!pdfDir.exists()) pdfDir.mkdirs()
-
                 val file = File(pdfDir, fileName)
 
                 val pdfWidth = 1080
                 val pdfHeight = 1527
-
                 val document = PdfDocument()
-                val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
-                val page = document.startPage(pageInfo)
 
-                drawNoteOnPage(note, page.canvas, pdfWidth, pdfHeight)
-
-                document.finishPage(page)
+                notes.forEachIndexed { index, note ->
+                    val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, index + 1).create()
+                    val page = document.startPage(pageInfo)
+                    drawNoteOnPage(note, page.canvas, pdfWidth, pdfHeight)
+                    document.finishPage(page)
+                }
 
                 FileOutputStream(file).use { outputStream ->
                     document.writeTo(outputStream)
@@ -146,6 +145,30 @@ class PdfExporter(private val context: Context) {
             } catch (e: Exception) {
                 e.printStackTrace()
                 null
+            }
+        }
+    }
+
+    suspend fun exportToSharedFiles(notes: List<Note>): List<File> {
+        return withContext(Dispatchers.IO) {
+            val pdfDir = File(context.cacheDir, "pdfs")
+            if (!pdfDir.exists()) pdfDir.mkdirs()
+
+            notes.mapNotNull { note ->
+                try {
+                    val fileName = "${note.title.replace(" ", "_")}_${note.id}.pdf"
+                    val file = File(pdfDir, fileName)
+                    val pdfWidth = 1080
+                    val pdfHeight = 1527
+                    val document = PdfDocument()
+                    val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
+                    val page = document.startPage(pageInfo)
+                    drawNoteOnPage(note, page.canvas, pdfWidth, pdfHeight)
+                    document.finishPage(page)
+                    FileOutputStream(file).use { document.writeTo(it) }
+                    document.close()
+                    file
+                } catch(e: Exception) { null }
             }
         }
     }

@@ -24,11 +24,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -118,7 +116,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     drawingData = viewModel.currentStrokes.toList(),
                     backgroundUri = viewModel.currentBackgroundUri
                 )
-                exporter.exportToPdf(noteToExport, it)
+                exporter.exportToPdf(listOf(noteToExport), it)
             }
         }
     }

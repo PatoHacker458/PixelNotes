@@ -23,23 +23,52 @@ import java.util.Locale
 
 class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
-    val notes = dao.getAllNotes()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val folders = dao.getAllFolders()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val notes = dao.getAllNotes().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val folders = dao.getAllFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     var currentFolderFilter by mutableStateOf("Todas")
-
     var currentScreen by mutableIntStateOf(0)
     var selectedNote by mutableStateOf<Note?>(null)
 
+    // Editor State
     var currentTitle by mutableStateOf("New Note")
     val currentStrokes = mutableStateListOf<StrokeData>()
     var currentBackgroundUri by mutableStateOf<String?>(null)
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
     var isEraserMode by mutableStateOf(false)
+
+    // Bulk Selection State
+    val selectedNotes = mutableStateListOf<Note>()
+    var showDeleteDialog by mutableStateOf(false)
+    var showMoveDialog by mutableStateOf(false)
+    var showShareDialog by mutableStateOf(false)
+
+    fun toggleSelection(note: Note) {
+        if (selectedNotes.any { it.id == note.id }) {
+            selectedNotes.removeAll { it.id == note.id }
+        } else {
+            selectedNotes.add(note)
+        }
+    }
+
+    fun clearSelection() {
+        selectedNotes.clear()
+    }
+
+    fun deleteSelectedNotes() {
+        viewModelScope.launch {
+            selectedNotes.forEach { dao.deleteNote(it) }
+            clearSelection()
+        }
+    }
+
+    fun moveSelectedNotes(newFolder: String) {
+        viewModelScope.launch {
+            selectedNotes.forEach { dao.updateNote(it.copy(folder = newFolder)) }
+            clearSelection()
+        }
+    }
 
     fun createFolder(name: String, parentPath: String?) {
         val path = if (parentPath == null) name else "$parentPath/$name"
@@ -54,7 +83,6 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         viewModelScope.launch {
             dao.renameFoldersCascade(oldPath, newPath, newName)
             dao.renameNotesFolderCascade(oldPath, newPath)
-
             if (currentFolderFilter == oldPath || currentFolderFilter.startsWith("$oldPath/")) {
                 currentFolderFilter = newPath + currentFolderFilter.removePrefix(oldPath)
             }
@@ -65,7 +93,6 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         viewModelScope.launch {
             dao.deleteFolderCascade(path)
             dao.deleteNotesInFolderCascade(path)
-
             if (currentFolderFilter == path || currentFolderFilter.startsWith("$path/")) {
                 currentFolderFilter = "Todas"
             }
@@ -95,7 +122,6 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
             val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
             saveCurrentNote(currentDate)
         }
-
         selectedNote = null
         currentStrokes.clear()
         currentBackgroundUri = null
@@ -104,7 +130,6 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
     fun saveCurrentNote(date: String) {
         val targetFolder = selectedNote?.folder ?: if (currentFolderFilter == "Todas") "General" else currentFolderFilter
-
         val note = selectedNote?.copy(
             title = currentTitle,
             drawingData = currentStrokes.toList(),
@@ -127,18 +152,6 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
                 dao.updateNote(note)
                 selectedNote = note
             }
-        }
-    }
-
-    fun deleteNote(note: Note) {
-        viewModelScope.launch {
-            dao.deleteNote(note)
-        }
-    }
-
-    fun moveNote(note: Note, newFolder: String) {
-        viewModelScope.launch {
-            dao.updateNote(note.copy(folder = newFolder))
         }
     }
 }
