@@ -48,6 +48,30 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         }
     }
 
+    fun renameFolder(oldPath: String, newName: String) {
+        val parentPath = oldPath.substringBeforeLast('/', "")
+        val newPath = if (parentPath.isEmpty()) newName else "$parentPath/$newName"
+        viewModelScope.launch {
+            dao.renameFoldersCascade(oldPath, newPath, newName)
+            dao.renameNotesFolderCascade(oldPath, newPath)
+
+            if (currentFolderFilter == oldPath || currentFolderFilter.startsWith("$oldPath/")) {
+                currentFolderFilter = newPath + currentFolderFilter.removePrefix(oldPath)
+            }
+        }
+    }
+
+    fun deleteFolder(path: String) {
+        viewModelScope.launch {
+            dao.deleteFolderCascade(path)
+            dao.deleteNotesInFolderCascade(path)
+
+            if (currentFolderFilter == path || currentFolderFilter.startsWith("$path/")) {
+                currentFolderFilter = "Todas"
+            }
+        }
+    }
+
     fun openNoteForEditing(note: Note?) {
         selectedNote = note
         currentStrokes.clear()

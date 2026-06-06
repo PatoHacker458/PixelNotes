@@ -28,6 +28,18 @@ interface NoteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFolder(folder: FolderEntity): Long
 
+    @Query("UPDATE folders SET path = :newPath || SUBSTR(path, LENGTH(:oldPath) + 1), name = CASE WHEN path = :oldPath THEN :newName ELSE name END WHERE path = :oldPath OR path LIKE :oldPath || '/%'")
+    suspend fun renameFoldersCascade(oldPath: String, newPath: String, newName: String): Int
+
+    @Query("UPDATE notes SET folder = :newPath || SUBSTR(folder, LENGTH(:oldPath) + 1) WHERE folder = :oldPath OR folder LIKE :oldPath || '/%'")
+    suspend fun renameNotesFolderCascade(oldPath: String, newPath: String): Int
+
+    @Query("DELETE FROM folders WHERE path = :path OR path LIKE :path || '/%'")
+    suspend fun deleteFolderCascade(path: String): Int
+
+    @Query("DELETE FROM notes WHERE folder = :path OR folder LIKE :path || '/%'")
+    suspend fun deleteNotesInFolderCascade(path: String): Int
+
     @Delete
     suspend fun deleteFolder(folder: FolderEntity): Int
 }

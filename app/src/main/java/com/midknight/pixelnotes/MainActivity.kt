@@ -68,6 +68,12 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onCreateFolder = { name, parent ->
                                     viewModel.createFolder(name, parent)
+                                },
+                                onRenameFolder = { oldPath, newName ->
+                                    viewModel.renameFolder(oldPath, newName)
+                                },
+                                onDeleteFolder = { path ->
+                                    viewModel.deleteFolder(path)
                                 }
                             )
                         }
@@ -86,6 +92,15 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onMoveNote = { note, folder ->
                                         viewModel.moveNote(note, folder)
+                                    },
+                                    onFolderSelected = { folderPath ->
+                                        viewModel.currentFolderFilter = folderPath
+                                    },
+                                    onRenameFolder = { oldPath, newName ->
+                                        viewModel.renameFolder(oldPath, newName)
+                                    },
+                                    onDeleteFolder = { path ->
+                                        viewModel.deleteFolder(path)
                                     }
                                 )
                                 1 -> DrawingScreen(viewModel = viewModel)

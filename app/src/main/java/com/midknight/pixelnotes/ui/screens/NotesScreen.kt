@@ -48,6 +48,7 @@ import androidx.core.content.FileProvider
 import com.midknight.pixelnotes.data.FolderEntity
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.domain.PdfExporter
+import com.midknight.pixelnotes.ui.components.FolderCard
 import com.midknight.pixelnotes.ui.components.NoteCard
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -62,7 +63,10 @@ fun NotesScreen(
     currentFolder: String,
     onNoteClick: (Note?) -> Unit,
     onDeleteNote: (Note) -> Unit,
-    onMoveNote: (Note, String) -> Unit
+    onMoveNote: (Note, String) -> Unit,
+    onFolderSelected: (String) -> Unit,
+    onRenameFolder: (String, String) -> Unit,
+    onDeleteFolder: (String) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -70,6 +74,11 @@ fun NotesScreen(
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var noteToExport by remember { mutableStateOf<Note?>(null) }
     var noteToMove by remember { mutableStateOf<Note?>(null) }
+
+    var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
+    var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
+    var newFolderName by remember { mutableStateOf("") }
+
     var searchQuery by remember { mutableStateOf("") }
 
     val pdfLauncher = rememberLauncherForActivityResult(
@@ -95,14 +104,52 @@ fun NotesScreen(
                 TextButton(onClick = {
                     noteToDelete?.let { onDeleteNote(it) }
                     noteToDelete = null
-                }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { noteToDelete = null }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { noteToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (folderToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { folderToDelete = null },
+            title = { Text("Delete Folder") },
+            text = { Text("Delete '${folderToDelete?.name}' and all its contents?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    folderToDelete?.let { onDeleteFolder(it.path) }
+                    folderToDelete = null
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (folderToRename != null) {
+        AlertDialog(
+            onDismissRequest = { folderToRename = null },
+            title = { Text("Rename Folder") },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    label = { Text("New Name") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newFolderName.isNotBlank()) {
+                        folderToRename?.let { onRenameFolder(it.path, newFolderName) }
+                    }
+                    folderToRename = null
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderToRename = null }) { Text("Cancel") }
             }
         )
     }
@@ -152,24 +199,30 @@ fun NotesScreen(
                 TextButton(onClick = {
                     noteToMove?.let { onMoveNote(it, selectedFolder) }
                     noteToMove = null
-                }) {
-                    Text("Move")
-                }
+                }) { Text("Move") }
             },
             dismissButton = {
-                TextButton(onClick = { noteToMove = null }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { noteToMove = null }) { Text("Cancel") }
             }
         )
     }
 
-    val filteredNotes = notes.filter { note ->
-        val matchesFolder = currentFolder == "Todas" || note.folder == currentFolder
-        val matchesSearch = searchQuery.isBlank() ||
-                note.title.contains(searchQuery, ignoreCase = true) ||
-                note.content.contains(searchQuery, ignoreCase = true)
-        matchesFolder && matchesSearch
+    val displayedFolders = if (searchQuery.isNotBlank()) {
+        folders.filter { it.name.contains(searchQuery, true) }
+    } else {
+        if (currentFolder == "Todas") {
+            folders.filter { it.parentPath == null }
+        } else {
+            folders.filter { it.parentPath == currentFolder }
+        }
+    }
+
+    val displayedNotes = if (searchQuery.isNotBlank()) {
+        notes.filter { note ->
+            note.title.contains(searchQuery, true) || note.content.contains(searchQuery, true)
+        }
+    } else {
+        if (currentFolder == "Todas") notes else notes.filter { it.folder == currentFolder }
     }
 
     Scaffold(
@@ -212,13 +265,13 @@ fun NotesScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            if (filteredNotes.isEmpty()) {
+            if (displayedFolders.isEmpty() && displayedNotes.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (searchQuery.isNotBlank()) "No matching notes found" else "No notes in $currentFolder",
+                        text = if (searchQuery.isNotBlank()) "No matching results found" else "Empty folder",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.outline
                     )
@@ -231,7 +284,21 @@ fun NotesScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(filteredNotes) { note ->
+                    items(displayedFolders) { folder ->
+                        FolderCard(
+                            folder = folder,
+                            onClick = {
+                                searchQuery = ""
+                                onFolderSelected(folder.path)
+                            },
+                            onRenameClick = {
+                                newFolderName = folder.name
+                                folderToRename = folder
+                            },
+                            onDeleteClick = { folderToDelete = folder }
+                        )
+                    }
+                    items(displayedNotes) { note ->
                         NoteCard(
                             note = note,
                             onClick = { onNoteClick(note) },
