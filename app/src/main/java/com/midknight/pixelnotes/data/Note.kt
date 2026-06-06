@@ -12,5 +12,6 @@ data class Note(
     val content: String,
     val date: String,
     val drawingData: List<StrokeData> = emptyList(),
-    val backgroundUri: String? = null
+    val backgroundUri: String? = null,
+    val folder: String = "General"
 )

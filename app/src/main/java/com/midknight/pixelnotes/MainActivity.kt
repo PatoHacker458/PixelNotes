@@ -54,34 +54,35 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     Row(modifier = Modifier.fillMaxSize()) {
-                        SideMenu(
-                            currentSelection = viewModel.currentScreen,
-                            onOptionSelected = { newScreen ->
-                                if (viewModel.currentScreen == 1 && newScreen != 1) {
-                                    val isBlank = viewModel.selectedNote == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note"
-                                    if (!isBlank) {
-                                        Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
-                                    }
-                                    viewModel.closeEditing()
+                        // El menú desaparece si estás en la pantalla de dibujo (1)
+                        if (viewModel.currentScreen != 1) {
+                            SideMenu(
+                                currentFolder = viewModel.currentFolderFilter,
+                                folders = viewModel.folders,
+                                onFolderSelected = { folder ->
+                                    viewModel.currentFolderFilter = folder
+                                    viewModel.currentScreen = 0
+                                },
+                                onSettingsSelected = {
+                                    viewModel.currentScreen = 2
                                 }
-
-                                if (newScreen == 1 && viewModel.currentScreen != 1) {
-                                    viewModel.openNoteForEditing(null)
-                                } else if (newScreen != 1) {
-                                    viewModel.currentScreen = newScreen
-                                }
-                            }
-                        )
+                            )
+                        }
 
                         Surface(modifier = Modifier.weight(1f)) {
                             when (viewModel.currentScreen) {
                                 0 -> NotesScreen(
                                     notes = notes,
+                                    folders = viewModel.folders,
+                                    currentFolder = viewModel.currentFolderFilter,
                                     onNoteClick = { note ->
                                         viewModel.openNoteForEditing(note)
                                     },
                                     onDeleteNote = { note ->
                                         viewModel.deleteNote(note)
+                                    },
+                                    onMoveNote = { note, folder ->
+                                        viewModel.moveNote(note, folder)
                                     }
                                 )
                                 1 -> DrawingScreen(viewModel = viewModel)

@@ -25,6 +25,9 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     val notes = dao.getAllNotes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val folders = listOf("Todas", "General", "Trabajo", "Escuela", "Personal")
+    var currentFolderFilter by mutableStateOf("Todas")
+
     var currentScreen by mutableIntStateOf(0)
     var selectedNote by mutableStateOf<Note?>(null)
 
@@ -66,6 +69,8 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     }
 
     fun saveCurrentNote(date: String) {
+        val targetFolder = selectedNote?.folder ?: if (currentFolderFilter == "Todas") "General" else currentFolderFilter
+
         val note = selectedNote?.copy(
             title = currentTitle,
             drawingData = currentStrokes.toList(),
@@ -76,7 +81,8 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
             content = "",
             date = date,
             drawingData = currentStrokes.toList(),
-            backgroundUri = currentBackgroundUri
+            backgroundUri = currentBackgroundUri,
+            folder = targetFolder
         )
 
         viewModelScope.launch {
@@ -93,6 +99,12 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun deleteNote(note: Note) {
         viewModelScope.launch {
             dao.deleteNote(note)
+        }
+    }
+
+    fun moveNote(note: Note, newFolder: String) {
+        viewModelScope.launch {
+            dao.updateNote(note.copy(folder = newFolder))
         }
     }
 }

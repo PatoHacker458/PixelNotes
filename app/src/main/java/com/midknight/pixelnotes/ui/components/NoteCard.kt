@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
@@ -40,6 +41,7 @@ fun NoteCard(
     onDeleteClick: () -> Unit,
     onExportClick: () -> Unit,
     onShareClick: () -> Unit,
+    onMoveClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -88,6 +90,14 @@ fun NoteCard(
                 expanded = showMenu,
                 onDismissRequest = { showMenu = false }
             ) {
+                DropdownMenuItem(
+                    text = { Text("Move to...") },
+                    onClick = {
+                        showMenu = false
+                        onMoveClick()
+                    },
+                    leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null) }
+                )
                 DropdownMenuItem(
                     text = { Text("Export as PDF") },
                     onClick = {

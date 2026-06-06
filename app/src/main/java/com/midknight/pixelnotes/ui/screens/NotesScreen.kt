@@ -6,13 +6,25 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,17 +46,22 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotesScreen(
     notes: List<Note>,
-    onNoteClick: (Note) -> Unit,
-    onDeleteNote: (Note) -> Unit
+    folders: List<String>,
+    currentFolder: String,
+    onNoteClick: (Note?) -> Unit,
+    onDeleteNote: (Note) -> Unit,
+    onMoveNote: (Note, String) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var noteToExport by remember { mutableStateOf<Note?>(null) }
+    var noteToMove by remember { mutableStateOf<Note?>(null) }
 
     val pdfLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/pdf")
@@ -81,41 +98,126 @@ fun NotesScreen(
         )
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 220.dp),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        items(notes) { note ->
-            NoteCard(
-                note = note,
-                onClick = { onNoteClick(note) },
-                onDeleteClick = { noteToDelete = note },
-                onExportClick = {
-                    noteToExport = note
-                    val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
-                    val fileName = "${note.title.replace(" ", "_")}_$currentDate.pdf"
-                    pdfLauncher.launch(fileName)
-                },
-                onShareClick = {
-                    coroutineScope.launch {
-                        val exporter = PdfExporter(context)
-                        val fileName = "${note.title.replace(" ", "_")}.pdf"
-                        val file = exporter.exportToSharedFile(note, fileName)
-                        file?.let {
-                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/pdf"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    if (noteToMove != null) {
+        var expanded by remember { mutableStateOf(false) }
+        val availableFolders = folders.filter { it != "Todas" }
+        var selectedFolder by remember { mutableStateOf(availableFolders.first()) }
+
+        AlertDialog(
+            onDismissRequest = { noteToMove = null },
+            title = { Text("Move Note") },
+            text = {
+                Column {
+                    Text("Select a new folder for '${noteToMove?.title}':")
+                    Box(modifier = Modifier.padding(top = 16.dp)) {
+                        ExposedDropdownMenuBox(
+                            expanded = expanded,
+                            onExpandedChange = { expanded = !expanded }
+                        ) {
+                            OutlinedTextField(
+                                value = selectedFolder,
+                                onValueChange = {},
+                                readOnly = true,
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                                modifier = Modifier.menuAnchor()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                availableFolders.forEach { folder ->
+                                    DropdownMenuItem(
+                                        text = { Text(folder) },
+                                        onClick = {
+                                            selectedFolder = folder
+                                            expanded = false
+                                        }
+                                    )
+                                }
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Note"))
                         }
                     }
                 }
-            )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    noteToMove?.let { onMoveNote(it, selectedFolder) }
+                    noteToMove = null
+                }) {
+                    Text("Move")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { noteToMove = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    val filteredNotes = if (currentFolder == "Todas") notes else notes.filter { it.folder == currentFolder }
+
+    Scaffold(
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { onNoteClick(null) },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "New Note")
+            }
+        }
+    ) { paddingValues ->
+        if (filteredNotes.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No notes in $currentFolder",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 220.dp),
+                modifier = Modifier.fillMaxSize().padding(paddingValues),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(filteredNotes) { note ->
+                    NoteCard(
+                        note = note,
+                        onClick = { onNoteClick(note) },
+                        onDeleteClick = { noteToDelete = note },
+                        onExportClick = {
+                            noteToExport = note
+                            val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
+                            val fileName = "${note.title.replace(" ", "_")}_$currentDate.pdf"
+                            pdfLauncher.launch(fileName)
+                        },
+                        onShareClick = {
+                            coroutineScope.launch {
+                                val exporter = PdfExporter(context)
+                                val fileName = "${note.title.replace(" ", "_")}.pdf"
+                                val file = exporter.exportToSharedFile(note, fileName)
+                                file?.let {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/pdf"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Share Note"))
+                                }
+                            }
+                        },
+                        onMoveClick = { noteToMove = note }
+                    )
+                }
+            }
         }
     }
 }
