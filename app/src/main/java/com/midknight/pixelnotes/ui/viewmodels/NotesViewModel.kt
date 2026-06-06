@@ -30,12 +30,14 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentBackgroundUri by mutableStateOf<String?>(null)
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
+    var isEraserMode by mutableStateOf(false)
 
     fun openNoteForEditing(note: Note?) {
         selectedNote = note
         currentStrokes.clear()
         currentColor = Color.Black
         currentStrokeWidth = 8f
+        isEraserMode = false
 
         if (note != null) {
             currentTitle = note.title
@@ -77,6 +79,12 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
             }
         }
         closeEditing()
+    }
+
+    fun deleteNote(note: Note) {
+        viewModelScope.launch {
+            dao.deleteNote(note)
+        }
     }
 }
 

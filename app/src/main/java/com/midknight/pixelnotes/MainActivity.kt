@@ -52,6 +52,9 @@ class MainActivity : ComponentActivity() {
                                     notes = notes,
                                     onNoteClick = { note ->
                                         viewModel.openNoteForEditing(note)
+                                    },
+                                    onDeleteNote = { note ->
+                                        viewModel.deleteNote(note)
                                     }
                                 )
                                 1 -> DrawingScreen(viewModel = viewModel)

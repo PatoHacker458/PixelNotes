@@ -9,7 +9,8 @@ data class PointData(val x: Float, val y: Float)
 data class StrokeData(
     val points: List<PointData>,
     val colorArgb: Int,
-    val strokeWidth: Float
+    val strokeWidth: Float,
+    val isEraser: Boolean = false
 ) {
     fun toPath(): Path {
         val path = Path()
@@ -27,6 +28,7 @@ fun Stroke.toData(points: List<PointData>): StrokeData {
     return StrokeData(
         points = points,
         colorArgb = this.color.toArgb(),
-        strokeWidth = this.strokeWidth
+        strokeWidth = this.strokeWidth,
+        isEraser = false
     )
 }

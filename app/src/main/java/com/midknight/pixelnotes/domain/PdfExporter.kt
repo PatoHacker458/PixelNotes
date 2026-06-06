@@ -34,7 +34,11 @@ class PdfExporter(private val context: Context) {
             }
 
             note.drawingData.forEach { strokeData ->
-                paint.color = strokeData.colorArgb
+                if (strokeData.isEraser) {
+                    paint.color = android.graphics.Color.WHITE
+                } else {
+                    paint.color = strokeData.colorArgb
+                }
                 paint.strokeWidth = strokeData.strokeWidth
 
                 val path = android.graphics.Path()

@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.Note
@@ -75,7 +76,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    val colors = listOf(Color.Black, Color.Red, Color.Blue, Color.Green, Color(0xFFFBC02D), Color.White)
+    val colors = listOf(Color.Black, Color.Red, Color.Blue, Color.Green, Color(0xFFFBC02D))
 
     val pdfLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/pdf")
@@ -176,7 +177,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         colors.forEach { color ->
                             Box(
                                 modifier = Modifier
@@ -184,19 +185,38 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     .clip(CircleShape)
                                     .background(color)
                                     .border(
-                                        width = if (viewModel.currentColor == color) 2.dp else 1.dp,
-                                        color = if (color == Color.White) Color.Gray else Color.Transparent,
+                                        width = if (viewModel.currentColor == color && !viewModel.isEraserMode) 2.dp else 1.dp,
+                                        color = if (viewModel.currentColor == color && !viewModel.isEraserMode) MaterialTheme.colorScheme.primary else Color.Transparent,
                                         shape = CircleShape
                                     )
-                                    .clickable { viewModel.currentColor = color }
+                                    .clickable {
+                                        viewModel.currentColor = color
+                                        viewModel.isEraserMode = false
+                                    }
                             )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(if (viewModel.isEraserMode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    shape = CircleShape
+                                )
+                                .clickable { viewModel.isEraserMode = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("E", fontWeight = FontWeight.Bold, color = if (viewModel.isEraserMode) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
                         }
                     }
 
                     Slider(
                         value = viewModel.currentStrokeWidth,
                         onValueChange = { viewModel.currentStrokeWidth = it },
-                        valueRange = 2f..30f,
+                        valueRange = 2f..50f,
                         modifier = Modifier
                             .weight(1f)
                             .padding(start = 16.dp)
@@ -284,6 +304,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         strokes = viewModel.currentStrokes,
                         currentColor = viewModel.currentColor,
                         currentStrokeWidth = viewModel.currentStrokeWidth,
+                        isEraserMode = viewModel.isEraserMode,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
