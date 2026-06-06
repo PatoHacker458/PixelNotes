@@ -19,7 +19,7 @@ import com.midknight.pixelnotes.data.NoteDatabase
 import com.midknight.pixelnotes.ui.components.SideMenu
 import com.midknight.pixelnotes.ui.screens.DrawingScreen
 import com.midknight.pixelnotes.ui.screens.NotesScreen
-import com.midknight.pixelnotes.ui.screens.PlaceholderScreen
+import com.midknight.pixelnotes.ui.screens.SettingsScreen
 import com.midknight.pixelnotes.ui.theme.PixelNotesTheme
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModelFactory
@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                                 1 -> DrawingScreen(viewModel = viewModel)
-                                2 -> PlaceholderScreen(title = "Settings")
+                                2 -> SettingsScreen()
                             }
                         }
                     }
