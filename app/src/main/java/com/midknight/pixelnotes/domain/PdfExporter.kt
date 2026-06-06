@@ -12,18 +12,8 @@ class PdfExporter(private val context: Context) {
 
     suspend fun exportToPdf(note: Note, uri: Uri) {
         withContext(Dispatchers.IO) {
-            var maxX = 1080f
-            var maxY = 1527f
-
-            note.drawingData.forEach { stroke ->
-                stroke.points.forEach { point ->
-                    if (point.x > maxX) maxX = point.x
-                    if (point.y > maxY) maxY = point.y
-                }
-            }
-
-            val pdfWidth = maxX.toInt() + 40
-            val pdfHeight = (pdfWidth * 1.414f).toInt().coerceAtLeast(maxY.toInt() + 40)
+            val pdfWidth = 1080
+            val pdfHeight = 1527
 
             val document = PdfDocument()
             val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
