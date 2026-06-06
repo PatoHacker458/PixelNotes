@@ -255,32 +255,38 @@ fun DrawingScreen(viewModel: NotesViewModel) {
 
             Box(
                 modifier = Modifier
-                    .fillMaxHeight(0.95f)
-                    .aspectRatio(1f / 1.414f)
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y
-                    )
-                    .transformable(state = transformState)
-                    .shadow(8.dp)
-                    .background(Color.White)
+                    .fillMaxSize()
+                    .transformable(state = transformState),
+                contentAlignment = Alignment.Center
             ) {
-                viewModel.currentBackgroundUri?.let { uri ->
-                    AsyncImage(
-                        model = uri,
-                        contentDescription = "Background Template",
-                        contentScale = ContentScale.Crop,
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight(0.95f)
+                        .aspectRatio(1f / 1.414f)
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offset.x,
+                            translationY = offset.y
+                        )
+                        .shadow(8.dp)
+                        .background(Color.White)
+                ) {
+                    viewModel.currentBackgroundUri?.let { uri ->
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = "Background Template",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    DrawingCanvas(
+                        strokes = viewModel.currentStrokes,
+                        currentColor = viewModel.currentColor,
+                        currentStrokeWidth = viewModel.currentStrokeWidth,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                DrawingCanvas(
-                    strokes = viewModel.currentStrokes,
-                    currentColor = viewModel.currentColor,
-                    currentStrokeWidth = viewModel.currentStrokeWidth,
-                    modifier = Modifier.fillMaxSize()
-                )
             }
         }
     }
