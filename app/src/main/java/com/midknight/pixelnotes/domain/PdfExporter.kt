@@ -20,10 +20,52 @@ class PdfExporter(private val context: Context) {
 
     private fun drawNoteOnPage(note: Note, pdfCanvas: Canvas, pdfWidth: Int, pdfHeight: Int) {
         val bgPaint = Paint().apply {
-            color = android.graphics.Color.WHITE
+            color = if (note.canvasColor == -1) android.graphics.Color.WHITE else note.canvasColor
             style = Paint.Style.FILL
         }
         pdfCanvas.drawRect(0f, 0f, pdfWidth.toFloat(), pdfHeight.toFloat(), bgPaint)
+
+        if (note.paperStyle > 0) {
+            val spacing = 80f
+            val paperPaint = Paint().apply {
+                color = android.graphics.Color.LTGRAY
+                strokeWidth = 2f
+                alpha = 100
+                style = Paint.Style.FILL
+            }
+            when (note.paperStyle) {
+                1 -> {
+                    var y = spacing
+                    while (y < pdfHeight) {
+                        pdfCanvas.drawLine(0f, y, pdfWidth.toFloat(), y, paperPaint)
+                        y += spacing
+                    }
+                }
+                2 -> {
+                    var y = spacing
+                    while (y < pdfHeight) {
+                        pdfCanvas.drawLine(0f, y, pdfWidth.toFloat(), y, paperPaint)
+                        y += spacing
+                    }
+                    var x = spacing
+                    while (x < pdfWidth) {
+                        pdfCanvas.drawLine(x, 0f, x, pdfHeight.toFloat(), paperPaint)
+                        x += spacing
+                    }
+                }
+                3 -> {
+                    var y = spacing
+                    while (y < pdfHeight) {
+                        var x = spacing
+                        while (x < pdfWidth) {
+                            pdfCanvas.drawCircle(x, y, 3f, paperPaint)
+                            x += spacing
+                        }
+                        y += spacing
+                    }
+                }
+            }
+        }
 
         if (note.backgroundUri != null) {
             try {

@@ -21,6 +21,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+enum class DrawingTool { PEN, HIGHLIGHTER, ERASER, TEXT, SELECTION }
+
 class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
     val notes = dao.getAllNotes().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -37,7 +39,11 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
     var isEraserMode by mutableStateOf(false)
+    var currentTool by mutableStateOf(DrawingTool.PEN)
     var eraserType by mutableIntStateOf(0)
+    var currentPaperStyle by mutableIntStateOf(0)
+    var currentCanvasColor by mutableIntStateOf(-1)
+    var fingerDrawingEnabled by mutableStateOf(true)
 
     val selectedNotes = mutableStateListOf<Note>()
     var showDeleteDialog by mutableStateOf(false)
@@ -131,15 +137,19 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         redoStrokes.clear()
         currentColor = Color.Black
         currentStrokeWidth = 8f
-        isEraserMode = false
+        currentTool = DrawingTool.PEN
 
         if (note != null) {
             currentTitle = note.title
             currentStrokes.addAll(note.drawingData)
             currentBackgroundUri = note.backgroundUri
+            currentPaperStyle = note.paperStyle
+            currentCanvasColor = note.canvasColor
         } else {
             currentTitle = "New Note"
             currentBackgroundUri = null
+            currentPaperStyle = 0
+            currentCanvasColor = -1
         }
         currentScreen = 1
     }
@@ -161,14 +171,18 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
             title = currentTitle,
             drawingData = currentStrokes.toList(),
             backgroundUri = currentBackgroundUri,
-            date = date
+            date = date,
+            paperStyle = currentPaperStyle,
+            canvasColor = currentCanvasColor
         ) ?: Note(
             title = currentTitle,
             content = "",
             date = date,
             drawingData = currentStrokes.toList(),
             backgroundUri = currentBackgroundUri,
-            folder = targetFolder
+            folder = targetFolder,
+            paperStyle = currentPaperStyle,
+            canvasColor = currentCanvasColor
         )
 
         viewModelScope.launch {

@@ -13,5 +13,7 @@ data class Note(
     val date: String,
     val drawingData: List<StrokeData> = emptyList(),
     val backgroundUri: String? = null,
-    val folder: String = "General"
+    val folder: String = "General",
+    val paperStyle: Int = 0,
+    val canvasColor: Int = -1
 )

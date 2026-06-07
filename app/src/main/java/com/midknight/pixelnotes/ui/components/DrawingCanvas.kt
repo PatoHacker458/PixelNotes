@@ -27,14 +27,16 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import com.midknight.pixelnotes.domain.PointData
 import com.midknight.pixelnotes.domain.StrokeData
+import com.midknight.pixelnotes.ui.viewmodels.DrawingTool
 
 @Composable
 fun DrawingCanvas(
     strokes: List<StrokeData>,
     currentColor: Color,
     currentStrokeWidth: Float,
-    isEraserMode: Boolean,
+    currentTool: DrawingTool,
     eraserType: Int,
+    fingerDrawingEnabled: Boolean,
     onStrokeAdd: (StrokeData) -> Unit,
     onStrokeRemove: (StrokeData) -> Unit,
     modifier: Modifier = Modifier
@@ -46,8 +48,9 @@ fun DrawingCanvas(
 
     val updatedColor by rememberUpdatedState(currentColor)
     val updatedStrokeWidth by rememberUpdatedState(currentStrokeWidth)
-    val updatedIsEraser by rememberUpdatedState(isEraserMode)
+    val updatedTool by rememberUpdatedState(currentTool)
     val updatedEraserType by rememberUpdatedState(eraserType)
+    val updatedFingerDrawingEnabled by rememberUpdatedState(fingerDrawingEnabled)
 
     Canvas(
         modifier = modifier
@@ -61,19 +64,20 @@ fun DrawingCanvas(
                     val down = awaitFirstDown()
                     val scaleRatio = size.width.toFloat() / virtualWidth
 
-                    if (down.type == PointerType.Stylus || down.type == PointerType.Eraser) {
-                        stylusModeActive = true
+                    val isStylusOrEraser = down.type == PointerType.Stylus || down.type == PointerType.Eraser
+                    if (isStylusOrEraser) stylusModeActive = true
+
+                    val isAllowedTouch = if (updatedFingerDrawingEnabled) {
+                        !stylusModeActive || isStylusOrEraser
+                    } else {
+                        isStylusOrEraser
                     }
 
-                    val isAllowedTouch = !stylusModeActive || (down.type == PointerType.Stylus || down.type == PointerType.Eraser)
                     val isHardwareEraser = down.type == PointerType.Eraser
-
-                    // Aquí corregimos el bug visual de la S-Pen
-                    val activeEraser = updatedIsEraser || isHardwareEraser
+                    val activeEraser = updatedTool == DrawingTool.ERASER || isHardwareEraser
                     currentIsEraser = activeEraser
 
                     if (activeEraser && updatedEraserType == 1 && isAllowedTouch) {
-                        // MODO BORRADOR DE TRAZOS (Stroke Eraser)
                         do {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == down.id }
@@ -81,8 +85,7 @@ fun DrawingCanvas(
                                 change.consume()
                                 val x = change.position.x / scaleRatio
                                 val y = change.position.y / scaleRatio
-
-                                val hitRadiusSq = 2500f // Área de colisión
+                                val hitRadiusSq = 2500f
                                 strokes.toList().forEach { stroke ->
                                     if (stroke.points.any { p ->
                                             val dx = p.x - x
@@ -97,7 +100,6 @@ fun DrawingCanvas(
                         return@awaitEachGesture
                     }
 
-                    // MODO DIBUJO O BORRADOR NORMAL
                     val startX = down.position.x / scaleRatio
                     val startY = down.position.y / scaleRatio
 
@@ -106,7 +108,7 @@ fun DrawingCanvas(
                     var prevX = startX
                     var prevY = startY
 
-                    if (isAllowedTouch) {
+                    if (isAllowedTouch && updatedTool != DrawingTool.TEXT && updatedTool != DrawingTool.SELECTION) {
                         currentPath = path
                         currentPoints = points
                     }
@@ -115,41 +117,37 @@ fun DrawingCanvas(
 
                     do {
                         val event = awaitPointerEvent()
-                        if (event.changes.size > 1) {
-                            isZooming = true
-                        }
+                        if (event.changes.size > 1) isZooming = true
 
-                        if (!isZooming && isAllowedTouch) {
+                        if (!isZooming && isAllowedTouch && updatedTool != DrawingTool.TEXT && updatedTool != DrawingTool.SELECTION) {
                             val change = event.changes.firstOrNull { it.id == down.id }
                             if (change != null && change.pressed) {
                                 change.consume()
                                 val x = change.position.x / scaleRatio
                                 val y = change.position.y / scaleRatio
-
                                 val midX = (prevX + x) / 2f
                                 val midY = (prevY + y) / 2f
-
                                 path.quadraticBezierTo(prevX, prevY, midX, midY)
                                 prevX = x
                                 prevY = y
-
                                 points.add(PointData(x, y))
                                 trigger++
                             }
                         }
                     } while (event.changes.any { it.pressed })
 
-                    if (!isZooming && isAllowedTouch) {
+                    if (!isZooming && isAllowedTouch && updatedTool != DrawingTool.TEXT && updatedTool != DrawingTool.SELECTION) {
                         path.lineTo(prevX, prevY)
                     }
 
-                    if ((!isZooming || points.size > 3) && isAllowedTouch) {
+                    if ((!isZooming || points.size > 3) && isAllowedTouch && updatedTool != DrawingTool.TEXT && updatedTool != DrawingTool.SELECTION) {
                         onStrokeAdd(
                             StrokeData(
                                 points = points.toList(),
                                 colorArgb = updatedColor.toArgb(),
                                 strokeWidth = updatedStrokeWidth,
-                                isEraser = currentIsEraser // Usamos el estado en vivo
+                                isEraser = currentIsEraser,
+                                isHighlighter = updatedTool == DrawingTool.HIGHLIGHTER && !isHardwareEraser
                             )
                         )
                     }
@@ -166,20 +164,26 @@ fun DrawingCanvas(
             scale(scaleX = scaleRatio, scaleY = scaleRatio, pivot = Offset.Zero)
         }) {
             strokes.forEach { strokeData ->
+                val color = if (strokeData.isEraser) Color.Transparent else Color(strokeData.colorArgb).copy(alpha = if (strokeData.isHighlighter) 0.4f else 1f)
+                val blend = if (strokeData.isEraser) BlendMode.Clear else if (strokeData.isHighlighter) BlendMode.Multiply else BlendMode.SrcOver
+
                 drawPath(
                     path = strokeData.toPath(),
-                    color = if (strokeData.isEraser) Color.Transparent else Color(strokeData.colorArgb),
+                    color = color,
                     style = Stroke(width = strokeData.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    blendMode = if (strokeData.isEraser) BlendMode.Clear else BlendMode.SrcOver
+                    blendMode = blend
                 )
             }
 
             currentPath?.let { path ->
+                val color = if (currentIsEraser) Color.Transparent else updatedColor.copy(alpha = if (updatedTool == DrawingTool.HIGHLIGHTER) 0.4f else 1f)
+                val blend = if (currentIsEraser) BlendMode.Clear else if (updatedTool == DrawingTool.HIGHLIGHTER) BlendMode.Multiply else BlendMode.SrcOver
+
                 drawPath(
                     path = path,
-                    color = if (currentIsEraser) Color.Transparent else updatedColor, // Bug visual resuelto
+                    color = color,
                     style = Stroke(width = updatedStrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    blendMode = if (currentIsEraser) BlendMode.Clear else BlendMode.SrcOver
+                    blendMode = blend
                 )
             }
         }
