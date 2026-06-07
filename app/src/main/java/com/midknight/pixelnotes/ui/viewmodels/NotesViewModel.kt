@@ -37,6 +37,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
     var isEraserMode by mutableStateOf(false)
+    var eraserType by mutableIntStateOf(0)
 
     val selectedNotes = mutableStateListOf<Note>()
     var showDeleteDialog by mutableStateOf(false)
@@ -46,6 +47,10 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun addStroke(stroke: StrokeData) {
         currentStrokes.add(stroke)
         redoStrokes.clear()
+    }
+
+    fun removeStroke(stroke: StrokeData) {
+        currentStrokes.remove(stroke)
     }
 
     fun undoStroke() {

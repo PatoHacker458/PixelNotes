@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -201,55 +202,44 @@ fun DrawingScreen(viewModel: NotesViewModel) {
         bottomBar = {
             BottomAppBar {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        colors.forEach { color ->
+                    if (viewModel.isEraserMode) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(color)
-                                    .border(
-                                        width = if (viewModel.currentColor == color && !viewModel.isEraserMode) 2.dp else 1.dp,
-                                        color = if (viewModel.currentColor == color && !viewModel.isEraserMode) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                        shape = CircleShape
-                                    )
-                                    .clickable {
-                                        viewModel.currentColor = color
-                                        viewModel.isEraserMode = false
-                                    }
-                            )
-                        }
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(8.dp)
+                            ) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
 
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(if (viewModel.isEraserMode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-                                .border(
-                                    width = 1.dp,
-                                    color = MaterialTheme.colorScheme.outline,
-                                    shape = CircleShape
+                            Box(
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(8.dp)
+                            ) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+
+                            Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape).clickable { viewModel.isEraserMode = false }, contentAlignment = Alignment.Center) {
+                                Text("E", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            colors.forEach { color ->
+                                Box(
+                                    modifier = Modifier.size(32.dp).clip(CircleShape).background(color)
+                                        .border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape)
+                                        .clickable { viewModel.currentColor = color }
                                 )
-                                .clickable { viewModel.isEraserMode = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("E", fontWeight = FontWeight.Bold, color = if (viewModel.isEraserMode) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
+                            }
+                            Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(Color.Transparent).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape).clickable { viewModel.isEraserMode = true }, contentAlignment = Alignment.Center) {
+                                Text("E", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            }
                         }
                     }
 
                     Slider(
                         value = viewModel.currentStrokeWidth,
                         onValueChange = { viewModel.currentStrokeWidth = it },
-                        valueRange = 2f..50f,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 16.dp)
+                        valueRange = 4f..40f,
+                        modifier = Modifier.weight(1f).padding(start = 16.dp)
                     )
                 }
             }
@@ -335,7 +325,9 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         currentColor = viewModel.currentColor,
                         currentStrokeWidth = viewModel.currentStrokeWidth,
                         isEraserMode = viewModel.isEraserMode,
+                        eraserType = viewModel.eraserType,
                         onStrokeAdd = { viewModel.addStroke(it) },
+                        onStrokeRemove = { viewModel.removeStroke(it) },
                         modifier = Modifier.fillMaxSize()
                     )
                 }

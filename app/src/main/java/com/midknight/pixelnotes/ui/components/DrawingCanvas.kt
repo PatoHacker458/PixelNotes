@@ -34,16 +34,20 @@ fun DrawingCanvas(
     currentColor: Color,
     currentStrokeWidth: Float,
     isEraserMode: Boolean,
+    eraserType: Int,
     onStrokeAdd: (StrokeData) -> Unit,
+    onStrokeRemove: (StrokeData) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var currentPath by remember { mutableStateOf<Path?>(null) }
     var currentPoints by remember { mutableStateOf<MutableList<PointData>>(mutableListOf()) }
     var trigger by remember { mutableIntStateOf(0) }
+    var currentIsEraser by remember { mutableStateOf(false) }
 
     val updatedColor by rememberUpdatedState(currentColor)
     val updatedStrokeWidth by rememberUpdatedState(currentStrokeWidth)
     val updatedIsEraser by rememberUpdatedState(isEraserMode)
+    val updatedEraserType by rememberUpdatedState(eraserType)
 
     Canvas(
         modifier = modifier
@@ -62,7 +66,38 @@ fun DrawingCanvas(
                     }
 
                     val isAllowedTouch = !stylusModeActive || (down.type == PointerType.Stylus || down.type == PointerType.Eraser)
+                    val isHardwareEraser = down.type == PointerType.Eraser
 
+                    // Aquí corregimos el bug visual de la S-Pen
+                    val activeEraser = updatedIsEraser || isHardwareEraser
+                    currentIsEraser = activeEraser
+
+                    if (activeEraser && updatedEraserType == 1 && isAllowedTouch) {
+                        // MODO BORRADOR DE TRAZOS (Stroke Eraser)
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change != null && change.pressed) {
+                                change.consume()
+                                val x = change.position.x / scaleRatio
+                                val y = change.position.y / scaleRatio
+
+                                val hitRadiusSq = 2500f // Área de colisión
+                                strokes.toList().forEach { stroke ->
+                                    if (stroke.points.any { p ->
+                                            val dx = p.x - x
+                                            val dy = p.y - y
+                                            (dx * dx + dy * dy) < hitRadiusSq
+                                        }) {
+                                        onStrokeRemove(stroke)
+                                    }
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+                        return@awaitEachGesture
+                    }
+
+                    // MODO DIBUJO O BORRADOR NORMAL
                     val startX = down.position.x / scaleRatio
                     val startY = down.position.y / scaleRatio
 
@@ -114,7 +149,7 @@ fun DrawingCanvas(
                                 points = points.toList(),
                                 colorArgb = updatedColor.toArgb(),
                                 strokeWidth = updatedStrokeWidth,
-                                isEraser = updatedIsEraser || down.type == PointerType.Eraser
+                                isEraser = currentIsEraser // Usamos el estado en vivo
                             )
                         )
                     }
@@ -142,9 +177,9 @@ fun DrawingCanvas(
             currentPath?.let { path ->
                 drawPath(
                     path = path,
-                    color = if (updatedIsEraser) Color.Transparent else updatedColor,
+                    color = if (currentIsEraser) Color.Transparent else updatedColor, // Bug visual resuelto
                     style = Stroke(width = updatedStrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    blendMode = if (updatedIsEraser) BlendMode.Clear else BlendMode.SrcOver
+                    blendMode = if (currentIsEraser) BlendMode.Clear else BlendMode.SrcOver
                 )
             }
         }
