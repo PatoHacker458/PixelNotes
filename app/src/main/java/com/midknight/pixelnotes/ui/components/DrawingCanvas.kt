@@ -51,6 +51,7 @@ fun DrawingCanvas(
     val updatedTool by rememberUpdatedState(currentTool)
     val updatedEraserType by rememberUpdatedState(eraserType)
     val updatedFingerDrawingEnabled by rememberUpdatedState(fingerDrawingEnabled)
+    val updatedStrokes by rememberUpdatedState(strokes) // Corrección críttica para el borrador stroke
 
     Canvas(
         modifier = modifier
@@ -86,7 +87,7 @@ fun DrawingCanvas(
                                 val x = change.position.x / scaleRatio
                                 val y = change.position.y / scaleRatio
                                 val hitRadiusSq = 2500f
-                                strokes.toList().forEach { stroke ->
+                                updatedStrokes.toList().forEach { stroke ->
                                     if (stroke.points.any { p ->
                                             val dx = p.x - x
                                             val dy = p.y - y

@@ -39,6 +39,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentTitle by mutableStateOf("New Note")
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
+    var currentEraserWidth by mutableFloatStateOf(20f) // Nuevo ancho independiente
     var currentTool by mutableStateOf(DrawingTool.PEN)
     var eraserType by mutableIntStateOf(0)
     var fingerDrawingEnabled by mutableStateOf(true)
@@ -108,7 +109,8 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
     fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) {
         val page = currentPages[pageIndex]
-        currentPages[pageIndex] = page.copy(drawingData = page.drawingData - stroke)
+        // Usamos filtrado absoluto por referencia para evitar bugs de borrado
+        currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke })
         undoStack.add(StrokeAction(pageIndex, stroke, false))
         redoStack.clear()
         activePageIndex = pageIndex
@@ -119,7 +121,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         redoStack.add(action)
         val page = currentPages[action.pageIndex]
         if (action.isAdd) {
-            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData - action.stroke)
+            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
         } else {
             currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
         }
@@ -133,7 +135,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         if (action.isAdd) {
             currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
         } else {
-            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData - action.stroke)
+            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
         }
         activePageIndex = action.pageIndex
     }
@@ -157,6 +159,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         redoStack.clear()
         currentColor = Color.Black
         currentStrokeWidth = 8f
+        currentEraserWidth = 20f
         currentTool = DrawingTool.PEN
         currentPages.clear()
 

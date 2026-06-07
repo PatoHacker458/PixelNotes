@@ -54,7 +54,6 @@ import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Redo
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Undo
@@ -223,7 +222,6 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 val maxX = (maxWidthPx * (scale - 1f)) / 2f
                 val maxY = (maxHeightPx * (scale - 1f)) / 2f
 
-                // Mágia de Scroll Continuo durante Zoom
                 val newOffsetY = offset.y + (offsetChange.y * 2.0f)
                 var overflowY = 0f
                 if (newOffsetY > maxY) overflowY = newOffsetY - maxY
@@ -256,7 +254,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             PaperTemplate(style = page.paperStyle, modifier = Modifier.fillMaxSize())
                             page.backgroundUri?.let { uri -> AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
                             DrawingCanvas(
-                                strokes = page.drawingData, currentColor = viewModel.currentColor, currentStrokeWidth = viewModel.currentStrokeWidth,
+                                strokes = page.drawingData, currentColor = viewModel.currentColor,
+                                currentStrokeWidth = if (viewModel.currentTool == DrawingTool.ERASER) viewModel.currentEraserWidth else viewModel.currentStrokeWidth,
                                 currentTool = viewModel.currentTool, eraserType = viewModel.eraserType, fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
                                 onStrokeAdd = { stroke -> viewModel.addStrokeToPage(index, stroke) }, onStrokeRemove = { stroke -> viewModel.removeStrokeFromPage(index, stroke) },
                                 modifier = Modifier.fillMaxSize()
@@ -266,7 +265,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 }
             }
 
-            // PANEL LATERAL FLOTANTE DE PÁGINAS (ANIMADO)
+            // PANEL LATERAL FLOTANTE DE PÁGINAS (Bloquea toques)
             androidx.compose.animation.AnimatedVisibility(
                 visible = showPagesPanel,
                 enter = slideInHorizontally(initialOffsetX = { -it }),
@@ -274,7 +273,9 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp, top = 80.dp, bottom = 80.dp).zIndex(10f)
             ) {
                 Column(
-                    modifier = Modifier.width(90.dp).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)).border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(24.dp)).padding(vertical = 16.dp),
+                    modifier = Modifier.width(90.dp).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                        .pointerInput(Unit){} // ESCUDO ANTI-GHOST CLICKS
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(24.dp)).padding(vertical = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     var draggedItem by remember { mutableStateOf<Int?>(null) }
@@ -334,7 +335,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
 
             // TOP TOOLBAR UNIFICADA
             Row(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp, start = 16.dp, end = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { viewModel.closeEditing() }) { Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                     TextField(
                         value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it },
@@ -344,7 +345,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     )
                 }
 
-                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { showPagesPanel = !showPagesPanel }) { Icon(Icons.Filled.Layers, contentDescription = "Pages", tint = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
                     Spacer(modifier = Modifier.width(4.dp))
                     Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
@@ -388,16 +389,24 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             // BOTTOM TOOLBAR
             Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
-                    Row(modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).pointerInput(Unit){}.padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) {
                             colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                            Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(120.dp))
+                            Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(100.dp))
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
                         } else if (viewModel.currentTool == DrawingTool.ERASER) {
                             Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
                             Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+
+                            // Nuevo Slider Exclusivo para el Borrador Normal
+                            if (viewModel.eraserType == 0) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("${(viewModel.currentEraserWidth / 100f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Slider(value = viewModel.currentEraserWidth, onValueChange = { viewModel.currentEraserWidth = it }, valueRange = 10f..100f, modifier = Modifier.width(100.dp))
+                            }
+
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
                         } else {
                             Text("Tool options coming soon", color = MaterialTheme.colorScheme.outline)
@@ -406,7 +415,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     }
                 }
 
-                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     val tools = listOf(DrawingTool.PEN to Icons.Filled.Edit, DrawingTool.HIGHLIGHTER to Icons.Filled.BorderColor, DrawingTool.ERASER to Icons.Filled.LayersClear, DrawingTool.TEXT to Icons.Filled.Title, DrawingTool.SELECTION to Icons.Filled.HighlightAlt)
                     tools.forEach { (tool, icon) ->
                         val isSelected = viewModel.currentTool == tool
