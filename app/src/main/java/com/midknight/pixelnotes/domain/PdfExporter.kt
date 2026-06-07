@@ -172,4 +172,20 @@ class PdfExporter(private val context: Context) {
             }
         }
     }
+
+    suspend fun exportSinglePageToPdf(page: PageEntity, uri: Uri) {
+        withContext(Dispatchers.IO) {
+            val pdfWidth = 1080
+            val pdfHeight = 1527
+            val document = PdfDocument()
+
+            val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
+            val pdfPage = document.startPage(pageInfo)
+            drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight)
+            document.finishPage(pdfPage)
+
+            context.contentResolver.openOutputStream(uri)?.use { document.writeTo(it) }
+            document.close()
+        }
+    }
 }

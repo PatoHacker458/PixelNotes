@@ -25,6 +25,8 @@ import java.util.Locale
 
 enum class DrawingTool { PEN, HIGHLIGHTER, ERASER, TEXT, SELECTION }
 
+data class StrokeAction(val pageIndex: Int, val stroke: StrokeData, val isAdd: Boolean)
+
 class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     val notes = dao.getAllNotesWithPages().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val folders = dao.getAllFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -33,118 +35,126 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentScreen by mutableIntStateOf(0)
     var selectedNoteWithPages by mutableStateOf<NoteWithPages?>(null)
 
-    // Editor State
+    // Global Editor State
     var currentTitle by mutableStateOf("New Note")
-    val currentStrokes = mutableStateListOf<StrokeData>()
-    val redoStrokes = mutableStateListOf<StrokeData>()
-    var currentBackgroundUri by mutableStateOf<String?>(null)
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
     var currentTool by mutableStateOf(DrawingTool.PEN)
     var eraserType by mutableIntStateOf(0)
-    var currentPaperStyle by mutableIntStateOf(0)
-    var currentCanvasColor by mutableIntStateOf(-1)
     var fingerDrawingEnabled by mutableStateOf(true)
 
-    // Multi-Page State
+    // Multi-Page Continuous State
     val currentPages = mutableStateListOf<PageEntity>()
-    var currentPageIndex by mutableIntStateOf(0)
+    var activePageIndex by mutableIntStateOf(0)
 
+    private val undoStack = mutableListOf<StrokeAction>()
+    private val redoStack = mutableListOf<StrokeAction>()
+
+    // Bulk Actions
     val selectedNotes = mutableStateListOf<NoteWithPages>()
     var showDeleteDialog by mutableStateOf(false)
     var showMoveDialog by mutableStateOf(false)
     var showShareDialog by mutableStateOf(false)
 
-    fun flushEditorToMemory() {
-        if (currentPages.isNotEmpty() && currentPageIndex < currentPages.size) {
-            currentPages[currentPageIndex] = currentPages[currentPageIndex].copy(
-                drawingData = currentStrokes.toList(),
-                backgroundUri = currentBackgroundUri,
-                paperStyle = currentPaperStyle,
-                canvasColor = currentCanvasColor
-            )
-        }
-    }
-
-    fun loadPage(index: Int) {
-        flushEditorToMemory()
-        currentPageIndex = index
-        val page = currentPages[index]
-        currentStrokes.clear()
-        redoStrokes.clear()
-        currentStrokes.addAll(page.drawingData)
-        currentBackgroundUri = page.backgroundUri
-        currentPaperStyle = page.paperStyle
-        currentCanvasColor = page.canvasColor
-    }
+    // --- PAGE MANAGEMENT ---
 
     fun addNewPage() {
-        flushEditorToMemory()
         val newPage = PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = currentPages.size)
         currentPages.add(newPage)
-        loadPage(currentPages.size - 1)
+        activePageIndex = currentPages.lastIndex
     }
 
-    fun deleteCurrentPage() {
+    fun deletePageAt(index: Int) {
         if (currentPages.size > 1) {
-            currentPages.removeAt(currentPageIndex)
-            if (currentPageIndex >= currentPages.size) currentPageIndex = currentPages.size - 1
-            loadPage(currentPageIndex)
+            currentPages.removeAt(index)
+            if (activePageIndex >= currentPages.size) activePageIndex = currentPages.size - 1
         }
     }
 
-    fun addStroke(stroke: StrokeData) { currentStrokes.add(stroke); redoStrokes.clear() }
-    fun removeStroke(stroke: StrokeData) { currentStrokes.remove(stroke) }
-    fun undoStroke() { if (currentStrokes.isNotEmpty()) redoStrokes.add(currentStrokes.removeAt(currentStrokes.lastIndex)) }
-    fun redoStroke() { if (redoStrokes.isNotEmpty()) currentStrokes.add(redoStrokes.removeAt(redoStrokes.lastIndex)) }
-    fun clearCanvas() { currentStrokes.clear(); redoStrokes.clear() }
-
-    fun toggleSelection(note: NoteWithPages) {
-        if (selectedNotes.any { it.note.id == note.note.id }) selectedNotes.removeAll { it.note.id == note.note.id } else selectedNotes.add(note)
-    }
-    fun clearSelection() { selectedNotes.clear() }
-
-    fun deleteSelectedNotes() {
-        viewModelScope.launch {
-            selectedNotes.forEach { dao.deleteNote(it.note); dao.deletePagesByNoteId(it.note.id) }
-            clearSelection()
+    fun movePage(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+        val page = currentPages.removeAt(fromIndex)
+        currentPages.add(toIndex, page)
+        if (activePageIndex == fromIndex) activePageIndex = toIndex
+        else if (activePageIndex in minOf(fromIndex, toIndex)..maxOf(fromIndex, toIndex)) {
+            if (fromIndex < toIndex) activePageIndex-- else activePageIndex++
         }
     }
 
-    fun moveSelectedNotes(newFolder: String) {
-        viewModelScope.launch {
-            selectedNotes.forEach { dao.updateNote(it.note.copy(folder = newFolder)) }
-            clearSelection()
-        }
+    fun updateActivePageBackground(uri: String?) {
+        if(currentPages.isEmpty()) return
+        currentPages[activePageIndex] = currentPages[activePageIndex].copy(backgroundUri = uri)
     }
 
-    fun createFolder(name: String, parentPath: String?) {
-        val path = if (parentPath == null) name else "$parentPath/$name"
-        viewModelScope.launch { dao.insertFolder(FolderEntity(path = path, name = name, parentPath = parentPath)) }
+    fun updateActivePagePaperStyle(style: Int) {
+        if(currentPages.isEmpty()) return
+        currentPages[activePageIndex] = currentPages[activePageIndex].copy(paperStyle = style)
     }
 
-    fun renameFolder(oldPath: String, newName: String) {
-        val parentPath = oldPath.substringBeforeLast('/', "")
-        val newPath = if (parentPath.isEmpty()) newName else "$parentPath/$newName"
-        viewModelScope.launch {
-            dao.renameFoldersCascade(oldPath, newPath, newName)
-            dao.renameNotesFolderCascade(oldPath, newPath)
-            if (currentFolderFilter == oldPath || currentFolderFilter.startsWith("$oldPath/")) currentFolderFilter = newPath + currentFolderFilter.removePrefix(oldPath)
-        }
+    fun updateActivePageCanvasColor(color: Int) {
+        if(currentPages.isEmpty()) return
+        currentPages[activePageIndex] = currentPages[activePageIndex].copy(canvasColor = color)
     }
 
-    fun deleteFolder(path: String) {
-        viewModelScope.launch {
-            dao.deleteFolderCascade(path)
-            dao.deleteNotesInFolderCascade(path)
-            if (currentFolderFilter == path || currentFolderFilter.startsWith("$path/")) currentFolderFilter = "Todas"
-        }
+    // --- CONTINUOUS DRAWING ENGINE ---
+
+    fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) {
+        val page = currentPages[pageIndex]
+        currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke)
+        undoStack.add(StrokeAction(pageIndex, stroke, true))
+        redoStack.clear()
+        activePageIndex = pageIndex
     }
+
+    fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) {
+        val page = currentPages[pageIndex]
+        currentPages[pageIndex] = page.copy(drawingData = page.drawingData - stroke)
+        undoStack.add(StrokeAction(pageIndex, stroke, false))
+        redoStack.clear()
+        activePageIndex = pageIndex
+    }
+
+    fun undo() {
+        val action = undoStack.removeLastOrNull() ?: return
+        redoStack.add(action)
+        val page = currentPages[action.pageIndex]
+        if (action.isAdd) {
+            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData - action.stroke)
+        } else {
+            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
+        }
+        activePageIndex = action.pageIndex
+    }
+
+    fun redo() {
+        val action = redoStack.removeLastOrNull() ?: return
+        undoStack.add(action)
+        val page = currentPages[action.pageIndex]
+        if (action.isAdd) {
+            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
+        } else {
+            currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData - action.stroke)
+        }
+        activePageIndex = action.pageIndex
+    }
+
+    fun isNoteBlank(): Boolean {
+        if (currentTitle != "New Note" || currentPages.size > 1) return false
+        val p = currentPages.firstOrNull() ?: return true
+        return p.drawingData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1
+    }
+
+    fun clearCanvas() {
+        if (currentPages.isEmpty()) return
+        currentPages[activePageIndex] = currentPages[activePageIndex].copy(drawingData = emptyList())
+    }
+
+    // --- ROUTING & SAVING ---
 
     fun openNoteForEditing(noteWP: NoteWithPages?) {
         selectedNoteWithPages = noteWP
-        currentStrokes.clear()
-        redoStrokes.clear()
+        undoStack.clear()
+        redoStack.clear()
         currentColor = Color.Black
         currentStrokeWidth = 8f
         currentTool = DrawingTool.PEN
@@ -153,29 +163,25 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         if (noteWP != null && noteWP.pages.isNotEmpty()) {
             currentTitle = noteWP.note.title
             currentPages.addAll(noteWP.pages)
-            loadPage(0)
+            activePageIndex = 0
         } else {
             currentTitle = "New Note"
             currentPages.add(PageEntity(noteId = 0, pageNumber = 0))
-            loadPage(0)
+            activePageIndex = 0
         }
         currentScreen = 1
     }
 
     fun closeEditing() {
-        val isBlank = selectedNoteWithPages == null && currentStrokes.isEmpty() && currentBackgroundUri == null && currentTitle == "New Note" && currentPaperStyle == 0 && currentCanvasColor == -1 && currentPages.size <= 1
-        if (!isBlank) {
+        if (!isNoteBlank()) {
             val currentDate = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
             saveCurrentNote(currentDate)
         }
         selectedNoteWithPages = null
-        currentStrokes.clear()
-        currentBackgroundUri = null
         currentScreen = 0
     }
 
     fun saveCurrentNote(date: String) {
-        flushEditorToMemory()
         val targetFolder = selectedNoteWithPages?.note?.folder ?: if (currentFolderFilter == "Todas") "General" else currentFolderFilter
         val noteToSave = selectedNoteWithPages?.note?.copy(title = currentTitle, date = date) ?: Note(title = currentTitle, content = "", date = date, folder = targetFolder)
 
@@ -185,6 +191,44 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
             currentPages.forEachIndexed { index, page ->
                 dao.insertPage(page.copy(pageId = 0, noteId = noteId, pageNumber = index))
             }
+        }
+    }
+
+    // --- BULK ACTIONS ---
+    fun toggleSelection(note: NoteWithPages) {
+        if (selectedNotes.any { it.note.id == note.note.id }) selectedNotes.removeAll { it.note.id == note.note.id } else selectedNotes.add(note)
+    }
+    fun clearSelection() { selectedNotes.clear() }
+    fun deleteSelectedNotes() {
+        viewModelScope.launch {
+            selectedNotes.forEach { dao.deleteNote(it.note); dao.deletePagesByNoteId(it.note.id) }
+            clearSelection()
+        }
+    }
+    fun moveSelectedNotes(newFolder: String) {
+        viewModelScope.launch {
+            selectedNotes.forEach { dao.updateNote(it.note.copy(folder = newFolder)) }
+            clearSelection()
+        }
+    }
+    fun createFolder(name: String, parentPath: String?) {
+        val path = if (parentPath == null) name else "$parentPath/$name"
+        viewModelScope.launch { dao.insertFolder(FolderEntity(path = path, name = name, parentPath = parentPath)) }
+    }
+    fun renameFolder(oldPath: String, newName: String) {
+        val parentPath = oldPath.substringBeforeLast('/', "")
+        val newPath = if (parentPath.isEmpty()) newName else "$parentPath/$newName"
+        viewModelScope.launch {
+            dao.renameFoldersCascade(oldPath, newPath, newName)
+            dao.renameNotesFolderCascade(oldPath, newPath)
+            if (currentFolderFilter == oldPath || currentFolderFilter.startsWith("$oldPath/")) currentFolderFilter = newPath + currentFolderFilter.removePrefix(oldPath)
+        }
+    }
+    fun deleteFolder(path: String) {
+        viewModelScope.launch {
+            dao.deleteFolderCascade(path)
+            dao.deleteNotesInFolderCascade(path)
+            if (currentFolderFilter == path || currentFolderFilter.startsWith("$path/")) currentFolderFilter = "Todas"
         }
     }
 }

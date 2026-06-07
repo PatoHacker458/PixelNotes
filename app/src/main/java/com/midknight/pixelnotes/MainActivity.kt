@@ -80,8 +80,7 @@ class MainActivity : ComponentActivity() {
                     if (viewModel.selectedNotes.isNotEmpty()) {
                         viewModel.clearSelection()
                     } else if (viewModel.currentScreen == 1) {
-                        val isBlank = viewModel.selectedNoteWithPages == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note" && viewModel.currentPaperStyle == 0 && viewModel.currentCanvasColor == -1 && viewModel.currentPages.size <= 1
-                        if (!isBlank) Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
+                        if (!viewModel.isNoteBlank()) Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
                         viewModel.closeEditing()
                     } else {
                         viewModel.currentScreen = 0
