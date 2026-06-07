@@ -5,13 +5,15 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NoteDao {
+    @Transaction
     @Query("SELECT * FROM notes ORDER BY id DESC")
-    fun getAllNotes(): Flow<List<Note>>
+    fun getAllNotesWithPages(): Flow<List<NoteWithPages>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNote(note: Note): Long
@@ -21,6 +23,18 @@ interface NoteDao {
 
     @Delete
     suspend fun deleteNote(note: Note): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPage(page: PageEntity): Long
+
+    @Update
+    suspend fun updatePage(page: PageEntity): Int
+
+    @Delete
+    suspend fun deletePage(page: PageEntity): Int
+
+    @Query("DELETE FROM pages WHERE noteId = :noteId")
+    suspend fun deletePagesByNoteId(noteId: Int): Int
 
     @Query("SELECT * FROM folders ORDER BY path ASC")
     fun getAllFolders(): Flow<List<FolderEntity>>

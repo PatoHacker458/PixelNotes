@@ -24,18 +24,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.midknight.pixelnotes.data.Note
+import com.midknight.pixelnotes.data.NoteWithPages
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NoteCard(
-    note: Note,
+    noteWithPages: NoteWithPages,
     isSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scale by animateFloatAsState(targetValue = if (isSelected) 0.95f else 1f, label = "ScaleAnimation")
+    val note = noteWithPages.note
 
     Card(
         modifier = modifier
@@ -68,7 +69,7 @@ fun NoteCard(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = note.content,
+                    text = "${noteWithPages.pages.size} page(s)",
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,

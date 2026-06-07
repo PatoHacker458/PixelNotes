@@ -36,19 +36,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.midknight.pixelnotes.data.FolderEntity
-import com.midknight.pixelnotes.data.Note
+import com.midknight.pixelnotes.data.NoteWithPages
 import com.midknight.pixelnotes.ui.components.FolderCard
 import com.midknight.pixelnotes.ui.components.NoteCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotesScreen(
-    notes: List<Note>,
+    notes: List<NoteWithPages>,
     folders: List<FolderEntity>,
     currentFolder: String,
-    selectedNotes: List<Note>,
-    onNoteClick: (Note) -> Unit,
-    onNoteLongClick: (Note) -> Unit,
+    selectedNotes: List<NoteWithPages>,
+    onNoteClick: (NoteWithPages) -> Unit,
+    onNoteLongClick: (NoteWithPages) -> Unit,
     onCreateNewNote: () -> Unit,
     onFolderSelected: (String) -> Unit,
     onRenameFolder: (String, String) -> Unit,
@@ -64,9 +64,7 @@ fun NotesScreen(
             onDismissRequest = { folderToDelete = null },
             title = { Text("Delete Folder") },
             text = { Text("Delete '${folderToDelete?.name}' and all its contents?") },
-            confirmButton = {
-                TextButton(onClick = { folderToDelete?.let { onDeleteFolder(it.path) }; folderToDelete = null }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
+            confirmButton = { TextButton(onClick = { folderToDelete?.let { onDeleteFolder(it.path) }; folderToDelete = null }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { folderToDelete = null }) { Text("Cancel") } }
         )
     }
@@ -76,12 +74,7 @@ fun NotesScreen(
             onDismissRequest = { folderToRename = null },
             title = { Text("Rename Folder") },
             text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, label = { Text("New Name") }) },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (newFolderName.isNotBlank()) folderToRename?.let { onRenameFolder(it.path, newFolderName) }
-                    folderToRename = null
-                }) { Text("Save") }
-            },
+            confirmButton = { TextButton(onClick = { if (newFolderName.isNotBlank()) folderToRename?.let { onRenameFolder(it.path, newFolderName) }; folderToRename = null }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { folderToRename = null }) { Text("Cancel") } }
         )
     }
@@ -93,9 +86,9 @@ fun NotesScreen(
     }
 
     val displayedNotes = if (searchQuery.isNotBlank()) {
-        notes.filter { note -> note.title.contains(searchQuery, true) || note.content.contains(searchQuery, true) }
+        notes.filter { noteWP -> noteWP.note.title.contains(searchQuery, true) || noteWP.note.content.contains(searchQuery, true) }
     } else {
-        if (currentFolder == "Todas") notes else notes.filter { it.folder == currentFolder }
+        if (currentFolder == "Todas") notes else notes.filter { it.note.folder == currentFolder }
     }
 
     Scaffold(
@@ -133,12 +126,12 @@ fun NotesScreen(
                             onDeleteClick = { folderToDelete = folder }
                         )
                     }
-                    items(displayedNotes) { note ->
+                    items(displayedNotes) { noteWP ->
                         NoteCard(
-                            note = note,
-                            isSelected = selectedNotes.any { it.id == note.id },
-                            onClick = { if (selectedNotes.isNotEmpty()) onNoteLongClick(note) else onNoteClick(note) },
-                            onLongClick = { onNoteLongClick(note) }
+                            noteWithPages = noteWP,
+                            isSelected = selectedNotes.any { it.note.id == noteWP.note.id },
+                            onClick = { if (selectedNotes.isNotEmpty()) onNoteLongClick(noteWP) else onNoteClick(noteWP) },
+                            onLongClick = { onNoteLongClick(noteWP) }
                         )
                     }
                 }

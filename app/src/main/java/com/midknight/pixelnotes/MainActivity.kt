@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
                     if (viewModel.selectedNotes.isNotEmpty()) {
                         viewModel.clearSelection()
                     } else if (viewModel.currentScreen == 1) {
-                        val isBlank = viewModel.selectedNote == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note"
+                        val isBlank = viewModel.selectedNoteWithPages == null && viewModel.currentStrokes.isEmpty() && viewModel.currentBackgroundUri == null && viewModel.currentTitle == "New Note" && viewModel.currentPaperStyle == 0 && viewModel.currentCanvasColor == -1 && viewModel.currentPages.size <= 1
                         if (!isBlank) Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
                         viewModel.closeEditing()
                     } else {
@@ -93,9 +93,7 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = { viewModel.showDeleteDialog = false },
                         title = { Text("Delete Notes") },
                         text = { Text("Delete ${viewModel.selectedNotes.size} selected notes?") },
-                        confirmButton = {
-                            TextButton(onClick = { viewModel.deleteSelectedNotes(); viewModel.showDeleteDialog = false }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-                        },
+                        confirmButton = { TextButton(onClick = { viewModel.deleteSelectedNotes(); viewModel.showDeleteDialog = false }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
                         dismissButton = { TextButton(onClick = { viewModel.showDeleteDialog = false }) { Text("Cancel") } }
                     )
                 }
@@ -114,9 +112,7 @@ class MainActivity : ComponentActivity() {
                                     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
                                         OutlinedTextField(value = selectedFolder, onValueChange = {}, readOnly = true, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }, modifier = Modifier.menuAnchor())
                                         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                            availableFolders.forEach { folder ->
-                                                DropdownMenuItem(text = { Text(folder) }, onClick = { selectedFolder = folder; expanded = false })
-                                            }
+                                            availableFolders.forEach { folder -> DropdownMenuItem(text = { Text(folder) }, onClick = { selectedFolder = folder; expanded = false }) }
                                         }
                                     }
                                 }
@@ -183,7 +179,7 @@ class MainActivity : ComponentActivity() {
                                 onActionShare = { if(viewModel.selectedNotes.size == 1) {
                                     coroutineScope.launch {
                                         val exporter = PdfExporter(context)
-                                        val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "${viewModel.selectedNotes.first().title}.pdf")
+                                        val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "${viewModel.selectedNotes.first().note.title}.pdf")
                                         file?.let {
                                             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
                                             val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -201,8 +197,8 @@ class MainActivity : ComponentActivity() {
                             when (viewModel.currentScreen) {
                                 0 -> NotesScreen(
                                     notes = notes, folders = folders, currentFolder = viewModel.currentFolderFilter, selectedNotes = viewModel.selectedNotes,
-                                    onNoteClick = { note -> viewModel.openNoteForEditing(note) },
-                                    onNoteLongClick = { note -> viewModel.toggleSelection(note) },
+                                    onNoteClick = { noteWP -> viewModel.openNoteForEditing(noteWP) },
+                                    onNoteLongClick = { noteWP -> viewModel.toggleSelection(noteWP) },
                                     onCreateNewNote = { viewModel.openNoteForEditing(null) },
                                     onFolderSelected = { folderPath -> viewModel.currentFolderFilter = folderPath },
                                     onRenameFolder = { oldPath, newName -> viewModel.renameFolder(oldPath, newName) },
