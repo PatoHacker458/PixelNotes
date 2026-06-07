@@ -8,6 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,6 +49,7 @@ import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.HighlightAlt
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PanTool
@@ -194,6 +197,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     var showCanvasColorMenu by remember { mutableStateOf(false) }
     var showPaperMenu by remember { mutableStateOf(false) }
     var showImageMenu by remember { mutableStateOf(false) }
+    var showPagesPanel by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     LaunchedEffect(listState.firstVisibleItemIndex) {
@@ -201,203 +205,220 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.surfaceVariant) { paddingValues ->
-        Row(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.padding(paddingValues).fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
+            val maxWidthPx = constraints.maxWidth.toFloat()
+            val maxHeightPx = constraints.maxHeight.toFloat()
+            var scale by remember { mutableFloatStateOf(1f) }
+            var offset by remember { mutableStateOf(Offset.Zero) }
+            var gestureIntent by remember { mutableStateOf("none") }
 
-            // SIDEBAR
-            Column(
-                modifier = Modifier.width(90.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                var draggedItem by remember { mutableStateOf<Int?>(null) }
-                var dragOffset by remember { mutableFloatStateOf(0f) }
+            val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
+                if (gestureIntent == "none") {
+                    val zoomDelta = abs(zoomChange - 1f) * 300f
+                    val panDelta = offsetChange.getDistance()
+                    if (panDelta > 3f && panDelta > zoomDelta) gestureIntent = "pan" else if (zoomDelta > 3f) gestureIntent = "zoom"
+                }
+                if (gestureIntent != "pan") scale = (scale * zoomChange).coerceIn(1f, 5f)
 
-                LazyColumn(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                val maxX = (maxWidthPx * (scale - 1f)) / 2f
+                val maxY = (maxHeightPx * (scale - 1f)) / 2f
+
+                // Mágia de Scroll Continuo durante Zoom
+                val newOffsetY = offset.y + (offsetChange.y * 2.0f)
+                var overflowY = 0f
+                if (newOffsetY > maxY) overflowY = newOffsetY - maxY
+                else if (newOffsetY < -maxY) overflowY = newOffsetY + maxY
+
+                if (overflowY != 0f) {
+                    listState.dispatchRawDelta(-overflowY)
+                }
+
+                offset = Offset(
+                    (offset.x + (offsetChange.x * 2.0f)).coerceIn(-maxX, maxX),
+                    newOffsetY.coerceIn(-maxY, maxY)
+                )
+            }
+
+            LaunchedEffect(transformState.isTransformInProgress) { if (!transformState.isTransformInProgress) gestureIntent = "none" }
+
+            // CANVAS CONTINUO
+            Box(modifier = Modifier.fillMaxSize().transformable(state = transformState), contentAlignment = Alignment.Center) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    contentPadding = PaddingValues(vertical = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(32.dp)
+                ) {
                     items(viewModel.currentPages.size) { index ->
-                        val isSelected = index == viewModel.activePageIndex
-                        val yOffset = if (draggedItem == index) dragOffset else 0f
-                        var showPageMenu by remember { mutableStateOf(false) }
+                        val page = viewModel.currentPages[index]
+                        Box(modifier = Modifier.fillParentMaxHeight(0.95f).aspectRatio(1f / 1.414f).shadow(8.dp).background(if (page.canvasColor == -1) Color.White else Color(page.canvasColor))) {
+                            PaperTemplate(style = page.paperStyle, modifier = Modifier.fillMaxSize())
+                            page.backgroundUri?.let { uri -> AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+                            DrawingCanvas(
+                                strokes = page.drawingData, currentColor = viewModel.currentColor, currentStrokeWidth = viewModel.currentStrokeWidth,
+                                currentTool = viewModel.currentTool, eraserType = viewModel.eraserType, fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
+                                onStrokeAdd = { stroke -> viewModel.addStrokeToPage(index, stroke) }, onStrokeRemove = { stroke -> viewModel.removeStrokeFromPage(index, stroke) },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            }
 
-                        Box(
-                            modifier = Modifier
-                                .padding(vertical = 8.dp)
-                                .zIndex(if (draggedItem == index) 1f else 0f)
-                                .graphicsLayer(translationY = yOffset)
-                                .pointerInput(Unit) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = { draggedItem = index; dragOffset = 0f },
-                                        onDragEnd = {
-                                            val targetIndex = (index + (dragOffset / 200f).toInt()).coerceIn(0, viewModel.currentPages.size - 1)
-                                            viewModel.movePage(index, targetIndex)
-                                            draggedItem = null
-                                            dragOffset = 0f
-                                        },
-                                        onDrag = { _, dragAmount -> dragOffset += dragAmount.y }
-                                    )
-                                }
-                        ) {
+            // PANEL LATERAL FLOTANTE DE PÁGINAS (ANIMADO)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showPagesPanel,
+                enter = slideInHorizontally(initialOffsetX = { -it }),
+                exit = slideOutHorizontally(targetOffsetX = { -it }),
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp, top = 80.dp, bottom = 80.dp).zIndex(10f)
+            ) {
+                Column(
+                    modifier = Modifier.width(90.dp).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)).border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(24.dp)).padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    var draggedItem by remember { mutableStateOf<Int?>(null) }
+                    var dragOffset by remember { mutableFloatStateOf(0f) }
+
+                    LazyColumn(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        items(viewModel.currentPages.size) { index ->
+                            val isSelected = index == viewModel.activePageIndex
+                            val yOffset = if (draggedItem == index) dragOffset else 0f
+                            var showPageMenu by remember { mutableStateOf(false) }
+
                             Box(
-                                modifier = Modifier.size(width = 60.dp, height = 80.dp).clip(RoundedCornerShape(8.dp))
-                                    .background(if (viewModel.currentPages[index].canvasColor == -1) Color.White else Color(viewModel.currentPages[index].canvasColor))
-                                    .border(width = if (isSelected) 3.dp else 1.dp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, shape = RoundedCornerShape(8.dp))
-                                    .clickable { coroutineScope.launch { listState.animateScrollToItem(index) } },
-                                contentAlignment = Alignment.Center
+                                modifier = Modifier.padding(vertical = 8.dp).zIndex(if (draggedItem == index) 1f else 0f).graphicsLayer(translationY = yOffset)
+                                    .pointerInput(Unit) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { draggedItem = index; dragOffset = 0f },
+                                            onDragEnd = {
+                                                val targetIndex = (index + (dragOffset / 200f).toInt()).coerceIn(0, viewModel.currentPages.size - 1)
+                                                viewModel.movePage(index, targetIndex)
+                                                draggedItem = null; dragOffset = 0f
+                                            },
+                                            onDrag = { _, dragAmount -> dragOffset += dragAmount.y }
+                                        )
+                                    }
                             ) {
-                                PaperTemplate(style = viewModel.currentPages[index].paperStyle, modifier = Modifier.fillMaxSize())
-                                Text("${index + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                            }
-
-                            Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
-                                IconButton(onClick = { showPageMenu = true }, modifier = Modifier.size(24.dp).background(MaterialTheme.colorScheme.surface.copy(alpha=0.7f), CircleShape)) {
-                                    Icon(Icons.Filled.MoreVert, contentDescription = "Menu", modifier = Modifier.size(16.dp))
+                                Box(
+                                    modifier = Modifier.size(width = 60.dp, height = 80.dp).clip(RoundedCornerShape(8.dp))
+                                        .background(if (viewModel.currentPages[index].canvasColor == -1) Color.White else Color(viewModel.currentPages[index].canvasColor))
+                                        .border(width = if (isSelected) 3.dp else 1.dp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, shape = RoundedCornerShape(8.dp))
+                                        .clickable { coroutineScope.launch { listState.animateScrollToItem(index) } },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    PaperTemplate(style = viewModel.currentPages[index].paperStyle, modifier = Modifier.fillMaxSize())
+                                    Text("${index + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                                 }
-                                DropdownMenu(expanded = showPageMenu, onDismissRequest = { showPageMenu = false }) {
-                                    DropdownMenuItem(text = { Text("Export as PDF") }, onClick = { showPageMenu = false; singlePageToExport = viewModel.currentPages[index]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${index + 1}.pdf") })
-                                    DropdownMenuItem(text = { Text("Export as Image") }, onClick = { showPageMenu = false; Toast.makeText(context, "Coming Soon", Toast.LENGTH_SHORT).show() })
-                                    if (viewModel.currentPages.size > 1) {
-                                        DropdownMenuItem(text = { Text("Delete Page", color = MaterialTheme.colorScheme.error) }, onClick = { showPageMenu = false; viewModel.deletePageAt(index) })
+
+                                Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
+                                    IconButton(onClick = { showPageMenu = true }, modifier = Modifier.size(24.dp).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f), CircleShape)) {
+                                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu", modifier = Modifier.size(16.dp))
+                                    }
+                                    DropdownMenu(expanded = showPageMenu, onDismissRequest = { showPageMenu = false }) {
+                                        DropdownMenuItem(text = { Text("Export as PDF") }, onClick = { showPageMenu = false; singlePageToExport = viewModel.currentPages[index]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${index + 1}.pdf") })
+                                        DropdownMenuItem(text = { Text("Export as Image") }, onClick = { showPageMenu = false; Toast.makeText(context, "Coming Soon", Toast.LENGTH_SHORT).show() })
+                                        if (viewModel.currentPages.size > 1) {
+                                            DropdownMenuItem(text = { Text("Delete Page", color = MaterialTheme.colorScheme.error) }, onClick = { showPageMenu = false; viewModel.deletePageAt(index) })
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-                IconButton(onClick = { viewModel.addNewPage(); coroutineScope.launch { listState.animateScrollToItem(viewModel.currentPages.lastIndex) } }, modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)) {
-                    Icon(Icons.Filled.Add, contentDescription = "Add Page", tint = MaterialTheme.colorScheme.onPrimary)
+                    IconButton(onClick = { viewModel.addNewPage(); coroutineScope.launch { listState.animateScrollToItem(viewModel.currentPages.lastIndex) } }, modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add Page", tint = MaterialTheme.colorScheme.onPrimary)
+                    }
                 }
             }
 
-            // MAIN CONTINUOUS CANVAS AREA
-            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds(), contentAlignment = Alignment.Center) {
-                val maxWidthPx = constraints.maxWidth.toFloat()
-                val maxHeightPx = constraints.maxHeight.toFloat()
-                var scale by remember { mutableFloatStateOf(1f) }
-                var offset by remember { mutableStateOf(Offset.Zero) }
-                var gestureIntent by remember { mutableStateOf("none") }
-
-                val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
-                    if (gestureIntent == "none") {
-                        val zoomDelta = abs(zoomChange - 1f) * 300f
-                        val panDelta = offsetChange.getDistance()
-                        if (panDelta > 3f && panDelta > zoomDelta) gestureIntent = "pan" else if (zoomDelta > 3f) gestureIntent = "zoom"
-                    }
-                    if (gestureIntent != "pan") scale = (scale * zoomChange).coerceIn(1f, 5f)
-                    val maxX = (maxWidthPx * (scale - 1f)) / 2f
-                    val maxY = (maxHeightPx * (scale - 1f)) / 2f
-                    offset = Offset((offset.x + (offsetChange.x * 2.0f)).coerceIn(-maxX, maxX), (offset.y + (offsetChange.y * 2.0f)).coerceIn(-maxY, maxY))
+            // TOP TOOLBAR UNIFICADA
+            Row(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp, start = 16.dp, end = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { viewModel.closeEditing() }) { Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                    TextField(
+                        value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it },
+                        modifier = Modifier.width(150.dp), singleLine = true,
+                        colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
+                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    )
                 }
 
-                LaunchedEffect(transformState.isTransformInProgress) { if (!transformState.isTransformInProgress) gestureIntent = "none" }
+                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { showPagesPanel = !showPagesPanel }) { Icon(Icons.Filled.Layers, contentDescription = "Pages", tint = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
+                    Spacer(modifier = Modifier.width(4.dp))
 
-                Box(modifier = Modifier.fillMaxSize().transformable(state = transformState), contentAlignment = Alignment.Center) {
-                    LazyColumn(
-                        state = listState,
-                        userScrollEnabled = scale == 1f,
-                        modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        contentPadding = PaddingValues(vertical = 32.dp),
-                        verticalArrangement = Arrangement.spacedBy(32.dp)
-                    ) {
-                        items(viewModel.currentPages.size) { index ->
-                            val page = viewModel.currentPages[index]
-                            Box(modifier = Modifier.fillParentMaxHeight(0.95f).aspectRatio(1f / 1.414f).shadow(8.dp).background(if (page.canvasColor == -1) Color.White else Color(page.canvasColor))) {
-                                PaperTemplate(style = page.paperStyle, modifier = Modifier.fillMaxSize())
-                                page.backgroundUri?.let { uri -> AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                                DrawingCanvas(
-                                    strokes = page.drawingData, currentColor = viewModel.currentColor, currentStrokeWidth = viewModel.currentStrokeWidth,
-                                    currentTool = viewModel.currentTool, eraserType = viewModel.eraserType, fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
-                                    onStrokeAdd = { stroke -> viewModel.addStrokeToPage(index, stroke) }, onStrokeRemove = { stroke -> viewModel.removeStrokeFromPage(index, stroke) },
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
+                    IconButton(onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled }) { Icon(if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool, contentDescription = null, tint = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
+                    Box {
+                        IconButton(onClick = { showPaperMenu = true }) { Icon(Icons.Filled.GridOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
+                            DropdownMenuItem(text = { Text("Blank") }, onClick = { viewModel.updateActivePagePaperStyle(0); showPaperMenu = false })
+                            DropdownMenuItem(text = { Text("Lined") }, onClick = { viewModel.updateActivePagePaperStyle(1); showPaperMenu = false })
+                            DropdownMenuItem(text = { Text("Grid") }, onClick = { viewModel.updateActivePagePaperStyle(2); showPaperMenu = false })
+                            DropdownMenuItem(text = { Text("Dotted") }, onClick = { viewModel.updateActivePagePaperStyle(3); showPaperMenu = false })
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { showCanvasColorMenu = true }) { Icon(Icons.Filled.FormatColorFill, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        DropdownMenu(expanded = showCanvasColorMenu, onDismissRequest = { showCanvasColorMenu = false }) {
+                            canvasColors.forEach { colorArgb -> DropdownMenuItem(text = { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(if (colorArgb == -1) Color.White else Color(colorArgb)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)); Spacer(modifier = Modifier.width(8.dp)); Text(if (colorArgb == -1) "Default White" else "Solid Color") } }, onClick = { viewModel.updateActivePageCanvasColor(colorArgb); showCanvasColorMenu = false }) }
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { showImageMenu = true }) { Icon(Icons.Filled.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        DropdownMenu(expanded = showImageMenu, onDismissRequest = { showImageMenu = false }) {
+                            DropdownMenuItem(text = { Text("Add Image to Page") }, onClick = { showImageMenu = false; photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+                            DropdownMenuItem(text = { Text("Remove Image") }, onClick = { showImageMenu = false; viewModel.updateActivePageBackground(null) })
+                            DropdownMenuItem(text = { Text("Import PDF") }, onClick = { showImageMenu = false; Toast.makeText(context, "Coming soon", Toast.LENGTH_SHORT).show() })
+                        }
+                    }
+                    IconButton(onClick = { viewModel.undo() }) { Icon(Icons.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                    IconButton(onClick = { viewModel.redo() }) { Icon(Icons.Filled.Redo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                    Box {
+                        IconButton(onClick = { showExportMenu = true }) { Icon(Icons.Filled.IosShare, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
+                            DropdownMenuItem(text = { Text("Export Note as PDF") }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
                         }
                     }
                 }
+            }
 
-                // TOP TOOLBAR
-                Row(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp, start = 16.dp, end = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { viewModel.closeEditing() }) { Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                        TextField(
-                            value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it },
-                            modifier = Modifier.width(150.dp), singleLine = true,
-                            colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
-                            textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                        )
-                    }
-
-                    Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled }) { Icon(if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool, contentDescription = null, tint = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
-                        Box {
-                            IconButton(onClick = { showPaperMenu = true }) { Icon(Icons.Filled.GridOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                            DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
-                                DropdownMenuItem(text = { Text("Blank") }, onClick = { viewModel.updateActivePagePaperStyle(0); showPaperMenu = false })
-                                DropdownMenuItem(text = { Text("Lined") }, onClick = { viewModel.updateActivePagePaperStyle(1); showPaperMenu = false })
-                                DropdownMenuItem(text = { Text("Grid") }, onClick = { viewModel.updateActivePagePaperStyle(2); showPaperMenu = false })
-                                DropdownMenuItem(text = { Text("Dotted") }, onClick = { viewModel.updateActivePagePaperStyle(3); showPaperMenu = false })
-                            }
-                        }
-                        Box {
-                            IconButton(onClick = { showCanvasColorMenu = true }) { Icon(Icons.Filled.FormatColorFill, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                            DropdownMenu(expanded = showCanvasColorMenu, onDismissRequest = { showCanvasColorMenu = false }) {
-                                canvasColors.forEach { colorArgb ->
-                                    DropdownMenuItem(text = { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(if (colorArgb == -1) Color.White else Color(colorArgb)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)); Spacer(modifier = Modifier.width(8.dp)); Text(if (colorArgb == -1) "Default White" else "Solid Color") } }, onClick = { viewModel.updateActivePageCanvasColor(colorArgb); showCanvasColorMenu = false })
-                                }
-                            }
-                        }
-                        Box {
-                            IconButton(onClick = { showImageMenu = true }) { Icon(Icons.Filled.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                            DropdownMenu(expanded = showImageMenu, onDismissRequest = { showImageMenu = false }) {
-                                DropdownMenuItem(text = { Text("Add Image to Page") }, onClick = { showImageMenu = false; photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-                                DropdownMenuItem(text = { Text("Remove Image") }, onClick = { showImageMenu = false; viewModel.updateActivePageBackground(null) })
-                                DropdownMenuItem(text = { Text("Import PDF") }, onClick = { showImageMenu = false; Toast.makeText(context, "Coming soon", Toast.LENGTH_SHORT).show() })
-                            }
-                        }
-                        IconButton(onClick = { viewModel.undo() }) { Icon(Icons.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                        IconButton(onClick = { viewModel.redo() }) { Icon(Icons.Filled.Redo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                        Box {
-                            IconButton(onClick = { showExportMenu = true }) { Icon(Icons.Filled.IosShare, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                            DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
-                                DropdownMenuItem(text = { Text("Export Note as PDF") }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
-                            }
+            // BOTTOM TOOLBAR
+            Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
+                    Row(modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) {
+                            colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(120.dp))
+                            IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
+                        } else if (viewModel.currentTool == DrawingTool.ERASER) {
+                            Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                            Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                            IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
+                        } else {
+                            Text("Tool options coming soon", color = MaterialTheme.colorScheme.outline)
+                            IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
                         }
                     }
                 }
 
-                // BOTTOM TOOLBAR
-                Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
-                        Row(modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) {
-                                colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(120.dp))
-                                IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
-                            } else if (viewModel.currentTool == DrawingTool.ERASER) {
-                                Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
-                                Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
-                                IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
-                            } else {
-                                Text("Tool options coming soon", color = MaterialTheme.colorScheme.outline)
-                                IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
-                            }
-                        }
-                    }
-
-                    Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val tools = listOf(DrawingTool.PEN to Icons.Filled.Edit, DrawingTool.HIGHLIGHTER to Icons.Filled.BorderColor, DrawingTool.ERASER to Icons.Filled.LayersClear, DrawingTool.TEXT to Icons.Filled.Title, DrawingTool.SELECTION to Icons.Filled.HighlightAlt)
-                        tools.forEach { (tool, icon) ->
-                            val isSelected = viewModel.currentTool == tool
-                            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).clickable { if (isSelected) showToolOptions = !showToolOptions else { viewModel.currentTool = tool; showToolOptions = true } }, contentAlignment = Alignment.Center) {
-                                Icon(icon, contentDescription = null, tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
-                            }
+                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val tools = listOf(DrawingTool.PEN to Icons.Filled.Edit, DrawingTool.HIGHLIGHTER to Icons.Filled.BorderColor, DrawingTool.ERASER to Icons.Filled.LayersClear, DrawingTool.TEXT to Icons.Filled.Title, DrawingTool.SELECTION to Icons.Filled.HighlightAlt)
+                    tools.forEach { (tool, icon) ->
+                        val isSelected = viewModel.currentTool == tool
+                        Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).clickable { if (isSelected) showToolOptions = !showToolOptions else { viewModel.currentTool = tool; showToolOptions = true } }, contentAlignment = Alignment.Center) {
+                            Icon(icon, contentDescription = null, tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
+            }
 
-                androidx.compose.animation.AnimatedVisibility(visible = scale != 1f || offset != Offset.Zero, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) {
-                    FloatingActionButton(onClick = { scale = 1f; offset = Offset.Zero }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) { Icon(Icons.Default.FilterCenterFocus, contentDescription = "Reset View") }
-                }
+            androidx.compose.animation.AnimatedVisibility(visible = scale != 1f || offset != Offset.Zero, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) {
+                FloatingActionButton(onClick = { scale = 1f; offset = Offset.Zero }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) { Icon(Icons.Default.FilterCenterFocus, contentDescription = "Reset View") }
             }
         }
     }
