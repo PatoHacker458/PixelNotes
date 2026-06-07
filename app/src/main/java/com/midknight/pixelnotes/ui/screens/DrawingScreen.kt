@@ -243,6 +243,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             Box(modifier = Modifier.fillMaxSize().transformable(state = transformState), contentAlignment = Alignment.Center) {
                 LazyColumn(
                     state = listState,
+                    userScrollEnabled = scale == 1f,
                     modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     contentPadding = PaddingValues(vertical = 32.dp),
@@ -253,11 +254,23 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         Box(modifier = Modifier.fillParentMaxHeight(0.95f).aspectRatio(1f / 1.414f).shadow(8.dp).background(if (page.canvasColor == -1) Color.White else Color(page.canvasColor))) {
                             PaperTemplate(style = page.paperStyle, modifier = Modifier.fillMaxSize())
                             page.backgroundUri?.let { uri -> AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+
                             DrawingCanvas(
-                                strokes = page.drawingData, currentColor = viewModel.currentColor,
+                                pageIndex = index,
+                                strokes = page.drawingData,
+                                selectedStrokes = if (viewModel.selectionPageIndex == index) viewModel.selectedStrokes else emptyList(),
+                                isSelectionActiveOnPage = viewModel.selectionPageIndex == index,
+                                selectionMode = viewModel.selectionMode,
+                                currentColor = viewModel.currentColor,
                                 currentStrokeWidth = if (viewModel.currentTool == DrawingTool.ERASER) viewModel.currentEraserWidth else viewModel.currentStrokeWidth,
-                                currentTool = viewModel.currentTool, eraserType = viewModel.eraserType, fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
-                                onStrokeAdd = { stroke -> viewModel.addStrokeToPage(index, stroke) }, onStrokeRemove = { stroke -> viewModel.removeStrokeFromPage(index, stroke) },
+                                currentTool = viewModel.currentTool,
+                                eraserType = viewModel.eraserType,
+                                fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
+                                onStrokeAdd = { stroke -> viewModel.addStrokeToPage(index, stroke) },
+                                onStrokeRemove = { stroke -> viewModel.removeStrokeFromPage(index, stroke) },
+                                onProcessSelection = { points -> viewModel.processSelection(index, points) },
+                                onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
+                                onCommitSelection = { viewModel.commitSelection() },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -274,7 +287,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             ) {
                 Column(
                     modifier = Modifier.width(90.dp).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
-                        .pointerInput(Unit){} // ESCUDO ANTI-GHOST CLICKS
+                        .pointerInput(Unit){}
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(24.dp)).padding(vertical = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -390,24 +403,38 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
                     Row(modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).pointerInput(Unit){}.padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+
                         if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) {
                             colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                             Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(100.dp))
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
+
                         } else if (viewModel.currentTool == DrawingTool.ERASER) {
                             Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
                             Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
 
-                            // Nuevo Slider Exclusivo para el Borrador Normal
                             if (viewModel.eraserType == 0) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("${(viewModel.currentEraserWidth / 100f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                 Slider(value = viewModel.currentEraserWidth, onValueChange = { viewModel.currentEraserWidth = it }, valueRange = 10f..100f, modifier = Modifier.width(100.dp))
                             }
-
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
+
+                        } else if (viewModel.currentTool == DrawingTool.SELECTION) {
+                            if (viewModel.selectedStrokes.isNotEmpty()) {
+                                // MODO SELECCIÓN ACTIVA: Opciones de Edición
+                                colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = 1.dp, color = Color.Transparent, shape = CircleShape).clickable { viewModel.changeSelectionColor(color.toArgb()) }) }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(onClick = { viewModel.deleteSelection() }) { Icon(Icons.Filled.DeleteSweep, contentDescription = "Delete Selection", tint = MaterialTheme.colorScheme.error) }
+                            } else {
+                                // MODO SELECCIÓN INACTIVA: Modos de Lazo
+                                Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Free Form", color = if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Rectangle", color = if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                            }
+                            IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
+
                         } else {
                             Text("Tool options coming soon", color = MaterialTheme.colorScheme.outline)
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
@@ -419,7 +446,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     val tools = listOf(DrawingTool.PEN to Icons.Filled.Edit, DrawingTool.HIGHLIGHTER to Icons.Filled.BorderColor, DrawingTool.ERASER to Icons.Filled.LayersClear, DrawingTool.TEXT to Icons.Filled.Title, DrawingTool.SELECTION to Icons.Filled.HighlightAlt)
                     tools.forEach { (tool, icon) ->
                         val isSelected = viewModel.currentTool == tool
-                        Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).clickable { if (isSelected) showToolOptions = !showToolOptions else { viewModel.currentTool = tool; showToolOptions = true } }, contentAlignment = Alignment.Center) {
+                        Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).clickable { if (isSelected) showToolOptions = !showToolOptions else { viewModel.setTool(tool); showToolOptions = true } }, contentAlignment = Alignment.Center) {
                             Icon(icon, contentDescription = null, tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
                         }
                     }
