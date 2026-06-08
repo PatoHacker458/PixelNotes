@@ -200,6 +200,13 @@ fun DrawingScreen(viewModel: NotesViewModel) {
         }
     }
 
+    val pdfImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            Toast.makeText(context, "Importing PDF... Please wait", Toast.LENGTH_LONG).show()
+            viewModel.importPdfDocument(context, it)
+        }
+    }
+
     var showToolOptions by remember { mutableStateOf(false) }
     var showExportMenu by remember { mutableStateOf(false) }
     var showCanvasColorMenu by remember { mutableStateOf(false) }
@@ -420,6 +427,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         DropdownMenu(expanded = showImageMenu, onDismissRequest = { showImageMenu = false }) {
                             DropdownMenuItem(text = { Text("Add Image to Page") }, onClick = { showImageMenu = false; photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
                             DropdownMenuItem(text = { Text("Remove Image") }, onClick = { showImageMenu = false; viewModel.updateActivePageBackground(null) })
+                            // NUEVA OPCIÓN AÑADIDA:
+                            DropdownMenuItem(text = { Text("Import PDF") }, onClick = { showImageMenu = false; pdfImportLauncher.launch("application/pdf") })
                         }
                     }
                     IconButton(onClick = { viewModel.undo() }) { Icon(Icons.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }

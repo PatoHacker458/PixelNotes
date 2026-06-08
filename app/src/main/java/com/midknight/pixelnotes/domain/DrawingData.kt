@@ -12,7 +12,8 @@ data class StrokeData(
     val colorArgb: Int,
     val strokeWidth: Float,
     val isEraser: Boolean = false,
-    val isHighlighter: Boolean = false
+    val isHighlighter: Boolean = false,
+    val shapeType: Int = 0 // 0 = Freehand, 1 = Line, 2 = Rectangle, 3 = Circle, 4 = Triangle
 ) {
     fun toPath(): Path {
         val path = Path()
@@ -56,24 +57,14 @@ data class StrokeData(
     }
 }
 
-fun Stroke.toData(points: List<PointData>): StrokeData {
-    return StrokeData(
-        points = points,
-        colorArgb = this.color.toArgb(),
-        strokeWidth = this.strokeWidth,
-        isEraser = false,
-        isHighlighter = false
-    )
-}
-
+// Geometría: Algoritmo de Ray-casting
 fun isPointInPolygon(point: PointData, polygon: List<PointData>): Boolean {
     var isInside = false
     var j = polygon.size - 1
     for (i in polygon.indices) {
         val pi = polygon[i]
         val pj = polygon[j]
-        if (((pi.y > point.y) != (pj.y > point.y)) &&
-            (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)) {
+        if (((pi.y > point.y) != (pj.y > point.y)) && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)) {
             isInside = !isInside
         }
         j = i

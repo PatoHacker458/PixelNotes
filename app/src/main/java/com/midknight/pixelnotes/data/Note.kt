@@ -24,7 +24,8 @@ data class PageEntity(
     val noteId: Int,
     val pageNumber: Int,
     val drawingData: List<StrokeData> = emptyList(),
-    val textData: List<TextData> = emptyList(), // NUEVO: Memoria de textos
+    val textData: List<TextData> = emptyList(),
+    val imageData: List<com.midknight.pixelnotes.domain.ImageData> = emptyList(),
     val backgroundUri: String? = null,
     val paperStyle: Int = 0,
     val canvasColor: Int = -1

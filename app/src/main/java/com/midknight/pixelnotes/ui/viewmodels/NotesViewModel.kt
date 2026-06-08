@@ -270,6 +270,39 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         }
     }
 
+    fun importPdfDocument(context: android.content.Context, uri: android.net.Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var pdfName = "Imported PDF"
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) pdfName = it.getString(it.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)).removeSuffix(".pdf")
+            }
+
+            val importer = com.midknight.pixelnotes.domain.PdfImporter(context)
+            val imagePaths = importer.importPdfToImages(uri, System.currentTimeMillis().toString())
+
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (imagePaths.isNotEmpty()) {
+                    commitSelection()
+                    if (isNoteBlank()) {
+                        currentTitle = pdfName
+                        currentPages.clear()
+                        imagePaths.forEachIndexed { index, path ->
+                            currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = index, backgroundUri = path))
+                        }
+                        activePageIndex = 0
+                    } else {
+                        val startIdx = currentPages.size
+                        imagePaths.forEachIndexed { index, path ->
+                            currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = startIdx + index, backgroundUri = path))
+                        }
+                        activePageIndex = currentPages.lastIndex
+                    }
+                }
+            }
+        }
+    }
+
     // --- FONT MANAGEMENT & BULK ACTIONS ---
     fun importFont(context: android.content.Context, uri: android.net.Uri, fontName: String) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {

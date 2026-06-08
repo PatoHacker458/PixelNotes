@@ -26,4 +26,13 @@ class Converters {
         val type = object : TypeToken<List<TextData>>() {}.type
         return gson.fromJson(value, type) ?: emptyList()
     }
+
+    @TypeConverter
+    fun fromImageList(value: List<com.midknight.pixelnotes.domain.ImageData>): String = gson.toJson(value)
+
+    @TypeConverter
+    fun toImageList(value: String): List<com.midknight.pixelnotes.domain.ImageData> {
+        val type = object : TypeToken<List<com.midknight.pixelnotes.domain.ImageData>>() {}.type
+        return gson.fromJson(value, type) ?: emptyList()
+    }
 }

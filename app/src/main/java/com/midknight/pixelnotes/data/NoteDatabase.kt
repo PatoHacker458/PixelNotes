@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 9, exportSchema = false)
+@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 10, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class NoteDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
@@ -64,6 +64,12 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `pages` ADD COLUMN `imageData` TEXT NOT NULL DEFAULT '[]'")
+            }
+        }
+
         fun getDatabase(context: android.content.Context): NoteDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = androidx.room.Room.databaseBuilder(
@@ -71,7 +77,7 @@ abstract class NoteDatabase : RoomDatabase() {
                     NoteDatabase::class.java,
                     "pixel_notes_database"
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10) // ACTUALIZADO
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
