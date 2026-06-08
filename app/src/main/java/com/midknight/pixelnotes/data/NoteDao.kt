@@ -27,6 +27,9 @@ interface NoteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPage(page: PageEntity): Long
 
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertPages(pages: List<com.midknight.pixelnotes.data.PageEntity>): List<Long>
+
     @Update
     suspend fun updatePage(page: PageEntity): Int
 

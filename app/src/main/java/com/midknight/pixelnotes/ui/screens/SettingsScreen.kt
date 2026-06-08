@@ -10,17 +10,22 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -45,6 +50,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,8 +63,8 @@ fun SettingsScreen(viewModel: NotesViewModel) {
     var showNameDialog by remember { mutableStateOf(false) }
     var pendingFontUri by remember { mutableStateOf<Uri?>(null) }
     var newFontName by remember { mutableStateOf("") }
+    var isCleaning by remember { mutableStateOf(false) }
 
-    // Usamos "*/*" porque los exploradores de Android a veces no reconocen bien los MIME de las fuentes
     val fontPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -100,7 +107,7 @@ fun SettingsScreen(viewModel: NotesViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings & Fonts", fontWeight = FontWeight.Bold) },
+                title = { Text("Settings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = { viewModel.currentScreen = 0 }) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -121,6 +128,41 @@ fun SettingsScreen(viewModel: NotesViewModel) {
     ) { paddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
 
+            // --- STORAGE MANAGER ---
+            Text(
+                text = "Storage Management",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(16.dp),
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(16.dp)) {
+                Column {
+                    Text("Clean Orphaned Files", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Deletes temporary images and ghost files from cancelled or deleted PDF imports to recover storage space.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            isCleaning = true
+                            viewModel.recoverStorageSpace(context) { message ->
+                                isCleaning = false
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                        enabled = !isCleaning
+                    ) {
+                        Icon(Icons.Filled.CleaningServices, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (isCleaning) "Cleaning..." else "Free Up Space")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- FONTS MANAGER ---
             Text(
                 text = "Installed Custom Fonts",
                 style = MaterialTheme.typography.titleMedium,
@@ -131,11 +173,7 @@ fun SettingsScreen(viewModel: NotesViewModel) {
 
             if (customFonts.isEmpty()) {
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No custom fonts installed yet.\n\nTap the button below to import your own .ttf or .otf files.",
-                        color = MaterialTheme.colorScheme.outline,
-                        textAlign = TextAlign.Center
-                    )
+                    Text("No custom fonts installed yet.\n\nTap the button below to import your own .ttf or .otf files.", color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
                 }
             } else {
                 LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
