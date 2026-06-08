@@ -204,7 +204,7 @@ class MainActivity : ComponentActivity() {
                                     onDeleteFolder = { path -> viewModel.deleteFolder(path) }
                                 )
                                 1 -> DrawingScreen(viewModel = viewModel)
-                                2 -> SettingsScreen()
+                                2 -> SettingsScreen(viewModel = viewModel)
                             }
                         }
                     }

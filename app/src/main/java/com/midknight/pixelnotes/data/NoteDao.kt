@@ -56,4 +56,13 @@ interface NoteDao {
 
     @Delete
     suspend fun deleteFolder(folder: FolderEntity): Int
+
+    @Query("SELECT * FROM custom_fonts ORDER BY name ASC")
+    fun getAllCustomFonts(): kotlinx.coroutines.flow.Flow<List<CustomFont>>
+
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertCustomFont(font: CustomFont): Long
+
+    @Delete
+    suspend fun deleteCustomFont(font: CustomFont): Int
 }

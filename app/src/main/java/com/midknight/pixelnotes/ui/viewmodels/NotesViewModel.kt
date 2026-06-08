@@ -17,6 +17,7 @@ import com.midknight.pixelnotes.data.NoteWithPages
 import com.midknight.pixelnotes.data.PageEntity
 import com.midknight.pixelnotes.domain.PointData
 import com.midknight.pixelnotes.domain.StrokeData
+import com.midknight.pixelnotes.domain.TextData
 import com.midknight.pixelnotes.domain.isPointInPolygon
 import com.midknight.pixelnotes.domain.isPointInRect
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,11 +29,12 @@ import java.util.Locale
 
 enum class DrawingTool { PEN, HIGHLIGHTER, ERASER, TEXT, SELECTION }
 
-data class StrokeAction(val pageIndex: Int, val stroke: StrokeData, val isAdd: Boolean)
+data class EditorAction(val pageIndex: Int, val stroke: StrokeData?, val text: TextData?, val isAdd: Boolean)
 
 class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     val notes = dao.getAllNotesWithPages().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val folders = dao.getAllFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val customFonts = dao.getAllCustomFonts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     var currentFolderFilter by mutableStateOf("Todas")
     var currentScreen by mutableIntStateOf(0)
@@ -46,25 +48,40 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var eraserType by mutableIntStateOf(0)
     var fingerDrawingEnabled by mutableStateOf(true)
 
+    // Text Tool State
+    var currentTextSize by mutableFloatStateOf(40f)
+    var currentFontName by mutableStateOf("Default")
+
     // Selection Tool State
     var currentTool by mutableStateOf(DrawingTool.PEN)
-        private set // Proteger la asignación directa
-    var selectionMode by mutableIntStateOf(0) // 0 = Free Form, 1 = Rectangle
+        private set
+    var selectionMode by mutableIntStateOf(0)
     val selectedStrokes = mutableStateListOf<StrokeData>()
+    val selectedTexts = mutableStateListOf<TextData>()
     var selectionPageIndex by mutableIntStateOf(-1)
 
     // Multi-Page Continuous State
     val currentPages = mutableStateListOf<PageEntity>()
     var activePageIndex by mutableIntStateOf(0)
 
-    private val undoStack = mutableListOf<StrokeAction>()
-    private val redoStack = mutableListOf<StrokeAction>()
+    private val undoStack = mutableListOf<EditorAction>()
+    private val redoStack = mutableListOf<EditorAction>()
 
     // Bulk Actions
     val selectedNotes = mutableStateListOf<NoteWithPages>()
     var showDeleteDialog by mutableStateOf(false)
     var showMoveDialog by mutableStateOf(false)
     var showShareDialog by mutableStateOf(false)
+
+    // --- TEXT ENGINE ---
+    fun addTextToPage(pageIndex: Int, text: TextData) {
+        commitSelection()
+        val page = currentPages[pageIndex]
+        currentPages[pageIndex] = page.copy(textData = page.textData + text)
+        undoStack.add(EditorAction(pageIndex, null, text, true))
+        redoStack.clear()
+        activePageIndex = pageIndex
+    }
 
     // --- SELECTION ENGINE (LASSO TOOL) ---
     fun setTool(tool: DrawingTool) {
@@ -77,80 +94,76 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         if (pathPoints.size < 3) return
 
         val page = currentPages[pageIndex]
+
+        // Filtrar Trazos
         val strokesToSelect = mutableListOf<StrokeData>()
         val remainingStrokes = mutableListOf<StrokeData>()
-
         page.drawingData.forEach { stroke ->
             val isSelected = stroke.points.any { p ->
-                if (selectionMode == 0) isPointInPolygon(p, pathPoints)
-                else isPointInRect(p, pathPoints.first(), pathPoints.last())
+                if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last())
             }
             if (isSelected && !stroke.isEraser) strokesToSelect.add(stroke) else remainingStrokes.add(stroke)
         }
 
-        if (strokesToSelect.isNotEmpty()) {
+        // Filtrar Textos
+        val textsToSelect = mutableListOf<TextData>()
+        val remainingTexts = mutableListOf<TextData>()
+        page.textData.forEach { text ->
+            val isSelected = if (selectionMode == 0) isPointInPolygon(PointData(text.x, text.y), pathPoints) else isPointInRect(PointData(text.x, text.y), pathPoints.first(), pathPoints.last())
+            if (isSelected) textsToSelect.add(text) else remainingTexts.add(text)
+        }
+
+        if (strokesToSelect.isNotEmpty() || textsToSelect.isNotEmpty()) {
             selectedStrokes.addAll(strokesToSelect)
+            selectedTexts.addAll(textsToSelect)
             selectionPageIndex = pageIndex
-            currentPages[pageIndex] = page.copy(drawingData = remainingStrokes)
+            currentPages[pageIndex] = page.copy(drawingData = remainingStrokes, textData = remainingTexts)
         }
     }
 
     fun moveSelection(dx: Float, dy: Float) {
-        val moved = selectedStrokes.map { it.translate(dx, dy) }
+        val movedStrokes = selectedStrokes.map { it.translate(dx, dy) }
         selectedStrokes.clear()
-        selectedStrokes.addAll(moved)
+        selectedStrokes.addAll(movedStrokes)
+
+        val movedTexts = selectedTexts.map { it.copy(x = it.x + dx, y = it.y + dy) }
+        selectedTexts.clear()
+        selectedTexts.addAll(movedTexts)
     }
 
     fun commitSelection() {
-        if (selectedStrokes.isNotEmpty() && selectionPageIndex != -1) {
+        if ((selectedStrokes.isNotEmpty() || selectedTexts.isNotEmpty()) && selectionPageIndex != -1) {
             val page = currentPages[selectionPageIndex]
-            currentPages[selectionPageIndex] = page.copy(drawingData = page.drawingData + selectedStrokes)
-            // Agregamos el commit al Undo Stack como trazos nuevos
-            selectedStrokes.forEach { undoStack.add(StrokeAction(selectionPageIndex, it, true)) }
+            currentPages[selectionPageIndex] = page.copy(drawingData = page.drawingData + selectedStrokes, textData = page.textData + selectedTexts)
+            selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, true)) }
+            selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, true)) }
             redoStack.clear()
             selectedStrokes.clear()
+            selectedTexts.clear()
             selectionPageIndex = -1
         }
     }
 
     fun deleteSelection() {
         selectedStrokes.clear()
+        selectedTexts.clear()
         selectionPageIndex = -1
     }
 
     fun changeSelectionColor(newColorArgb: Int) {
-        val recolored = selectedStrokes.map { it.copy(colorArgb = newColorArgb) }
+        val recoloredStrokes = selectedStrokes.map { it.copy(colorArgb = newColorArgb) }
         selectedStrokes.clear()
-        selectedStrokes.addAll(recolored)
+        selectedStrokes.addAll(recoloredStrokes)
+
+        val recoloredTexts = selectedTexts.map { it.copy(colorArgb = newColorArgb) }
+        selectedTexts.clear()
+        selectedTexts.addAll(recoloredTexts)
     }
 
     // --- PAGE MANAGEMENT ---
-    fun addNewPage() {
-        commitSelection()
-        val newPage = PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = currentPages.size)
-        currentPages.add(newPage)
-        activePageIndex = currentPages.lastIndex
-    }
-
-    fun deletePageAt(index: Int) {
-        commitSelection()
-        if (currentPages.size > 1) {
-            currentPages.removeAt(index)
-            if (activePageIndex >= currentPages.size) activePageIndex = currentPages.size - 1
-        }
-    }
-
-    fun movePage(fromIndex: Int, toIndex: Int) {
-        commitSelection()
-        if (fromIndex == toIndex) return
-        val page = currentPages.removeAt(fromIndex)
-        currentPages.add(toIndex, page)
-        if (activePageIndex == fromIndex) activePageIndex = toIndex
-        else if (activePageIndex in minOf(fromIndex, toIndex)..maxOf(fromIndex, toIndex)) {
-            if (fromIndex < toIndex) activePageIndex-- else activePageIndex++
-        }
-    }
-
+    fun addNewPage() { commitSelection(); val newPage = PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = currentPages.size); currentPages.add(newPage); activePageIndex = currentPages.lastIndex }
+    fun deletePageAt(index: Int) { commitSelection(); if (currentPages.size > 1) { currentPages.removeAt(index); if (activePageIndex >= currentPages.size) activePageIndex = currentPages.size - 1 } }
+    fun movePage(fromIndex: Int, toIndex: Int) { commitSelection(); if (fromIndex == toIndex) return; val page = currentPages.removeAt(fromIndex); currentPages.add(toIndex, page); if (activePageIndex == fromIndex) activePageIndex = toIndex else if (activePageIndex in minOf(fromIndex, toIndex)..maxOf(fromIndex, toIndex)) { if (fromIndex < toIndex) activePageIndex-- else activePageIndex++ } }
     fun updateActivePageBackground(uri: String?) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(backgroundUri = uri) }
     fun updateActivePagePaperStyle(style: Int) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(paperStyle = style) }
     fun updateActivePageCanvasColor(color: Int) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(canvasColor = color) }
@@ -159,7 +172,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) {
         val page = currentPages[pageIndex]
         currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke)
-        undoStack.add(StrokeAction(pageIndex, stroke, true))
+        undoStack.add(EditorAction(pageIndex, stroke, null, true))
         redoStack.clear()
         activePageIndex = pageIndex
     }
@@ -167,7 +180,7 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) {
         val page = currentPages[pageIndex]
         currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke })
-        undoStack.add(StrokeAction(pageIndex, stroke, false))
+        undoStack.add(EditorAction(pageIndex, stroke, null, false))
         redoStack.clear()
         activePageIndex = pageIndex
     }
@@ -177,8 +190,13 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         val action = undoStack.removeLastOrNull() ?: return
         redoStack.add(action)
         val page = currentPages[action.pageIndex]
-        if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
-        else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
+        if (action.stroke != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
+            else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
+        } else if (action.text != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id })
+            else currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text)
+        }
         activePageIndex = action.pageIndex
     }
 
@@ -187,18 +205,23 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         val action = redoStack.removeLastOrNull() ?: return
         undoStack.add(action)
         val page = currentPages[action.pageIndex]
-        if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
-        else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
+        if (action.stroke != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
+            else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
+        } else if (action.text != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text)
+            else currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id })
+        }
         activePageIndex = action.pageIndex
     }
 
     fun isNoteBlank(): Boolean {
         if (currentTitle != "New Note" || currentPages.size > 1) return false
         val p = currentPages.firstOrNull() ?: return true
-        return p.drawingData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1
+        return p.drawingData.isEmpty() && p.textData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1
     }
 
-    fun clearCanvas() { if (currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(drawingData = emptyList()) }
+    fun clearCanvas() { if (currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(drawingData = emptyList(), textData = emptyList()) }
 
     // --- ROUTING & SAVING ---
     fun openNoteForEditing(noteWP: NoteWithPages?) {
@@ -208,6 +231,8 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         currentColor = Color.Black
         currentStrokeWidth = 8f
         currentEraserWidth = 20f
+        currentTextSize = 40f
+        currentFontName = "Default"
         setTool(DrawingTool.PEN)
         currentPages.clear()
 
@@ -245,7 +270,33 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         }
     }
 
-    // --- BULK ACTIONS ---
+    // --- FONT MANAGEMENT & BULK ACTIONS ---
+    fun importFont(context: android.content.Context, uri: android.net.Uri, fontName: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val fontsDir = java.io.File(context.filesDir, "custom_fonts")
+                if (!fontsDir.exists()) fontsDir.mkdirs()
+                var ext = ".ttf"
+                val cursor = context.contentResolver.query(uri, null, null, null, null)
+                cursor?.use { if (it.moveToFirst()) { val displayName = it.getString(it.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)); if (displayName.endsWith(".otf", true)) ext = ".otf" } }
+                val fileName = "font_${System.currentTimeMillis()}$ext"
+                val destFile = java.io.File(fontsDir, fileName)
+                context.contentResolver.openInputStream(uri)?.use { input -> java.io.FileOutputStream(destFile).use { output -> input.copyTo(output) } }
+                dao.insertCustomFont(com.midknight.pixelnotes.data.CustomFont(name = fontName, fileName = fileName))
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    fun deleteFont(context: android.content.Context, font: com.midknight.pixelnotes.data.CustomFont) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val file = java.io.File(java.io.File(context.filesDir, "custom_fonts"), font.fileName)
+                if (file.exists()) file.delete()
+                dao.deleteCustomFont(font)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
     fun toggleSelection(note: NoteWithPages) { if (selectedNotes.any { it.note.id == note.note.id }) selectedNotes.removeAll { it.note.id == note.note.id } else selectedNotes.add(note) }
     fun clearSelection() { selectedNotes.clear() }
     fun deleteSelectedNotes() { viewModelScope.launch { selectedNotes.forEach { dao.deleteNote(it.note); dao.deletePagesByNoteId(it.note.id) }; clearSelection() } }

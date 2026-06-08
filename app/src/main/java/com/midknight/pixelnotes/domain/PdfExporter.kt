@@ -10,16 +10,19 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
+import com.midknight.pixelnotes.data.CustomFont
+import com.midknight.pixelnotes.data.NoteDatabase
 import com.midknight.pixelnotes.data.NoteWithPages
 import com.midknight.pixelnotes.data.PageEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
 class PdfExporter(private val context: Context) {
 
-    private fun drawPageOnPdf(page: PageEntity, pdfCanvas: Canvas, pdfWidth: Int, pdfHeight: Int) {
+    private fun drawPageOnPdf(page: PageEntity, pdfCanvas: Canvas, pdfWidth: Int, pdfHeight: Int, customFonts: List<CustomFont>) {
         val bgPaint = Paint().apply {
             color = if (page.canvasColor == -1) android.graphics.Color.WHITE else page.canvasColor
             style = Paint.Style.FILL
@@ -73,6 +76,7 @@ class PdfExporter(private val context: Context) {
         val paint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
         val clearXfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
 
+        // Dibujar Tinta
         page.drawingData.forEach { strokeData ->
             if (strokeData.isEraser) { paint.xfermode = clearXfermode; paint.color = android.graphics.Color.TRANSPARENT }
             else { paint.xfermode = null; paint.color = strokeData.colorArgb }
@@ -97,10 +101,24 @@ class PdfExporter(private val context: Context) {
         }
         pdfCanvas.drawBitmap(strokeBitmap, 0f, 0f, null)
         strokeBitmap.recycle()
+
+        // Dibujar Textos Flotantes
+        page.textData.forEach { textData ->
+            val fontInfo = customFonts.find { it.name == textData.fontName }
+            val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName)
+            val textPaint = Paint().apply {
+                color = textData.colorArgb
+                textSize = textData.fontSize
+                typeface = tf
+                isAntiAlias = true
+            }
+            pdfCanvas.drawText(textData.text, textData.x, textData.y, textPaint)
+        }
     }
 
     suspend fun exportToPdf(notes: List<NoteWithPages>, uri: Uri) {
         withContext(Dispatchers.IO) {
+            val customFonts = NoteDatabase.getDatabase(context).noteDao().getAllCustomFonts().first()
             val pdfWidth = 1080
             val pdfHeight = 1527
             val document = PdfDocument()
@@ -110,7 +128,7 @@ class PdfExporter(private val context: Context) {
                 noteWP.pages.forEach { page ->
                     val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, pageIndex++).create()
                     val pdfPage = document.startPage(pageInfo)
-                    drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight)
+                    drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight, customFonts)
                     document.finishPage(pdfPage)
                 }
             }
@@ -119,9 +137,27 @@ class PdfExporter(private val context: Context) {
         }
     }
 
+    suspend fun exportSinglePageToPdf(page: PageEntity, uri: Uri) {
+        withContext(Dispatchers.IO) {
+            val customFonts = NoteDatabase.getDatabase(context).noteDao().getAllCustomFonts().first()
+            val pdfWidth = 1080
+            val pdfHeight = 1527
+            val document = PdfDocument()
+
+            val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
+            val pdfPage = document.startPage(pageInfo)
+            drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight, customFonts)
+            document.finishPage(pdfPage)
+
+            context.contentResolver.openOutputStream(uri)?.use { document.writeTo(it) }
+            document.close()
+        }
+    }
+
     suspend fun exportToSharedFile(notes: List<NoteWithPages>, fileName: String): File? {
         return withContext(Dispatchers.IO) {
             try {
+                val customFonts = NoteDatabase.getDatabase(context).noteDao().getAllCustomFonts().first()
                 val pdfDir = File(context.cacheDir, "pdfs")
                 if (!pdfDir.exists()) pdfDir.mkdirs()
                 val file = File(pdfDir, fileName)
@@ -134,7 +170,7 @@ class PdfExporter(private val context: Context) {
                     noteWP.pages.forEach { page ->
                         val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, pageIndex++).create()
                         val pdfPage = document.startPage(pageInfo)
-                        drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight)
+                        drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight, customFonts)
                         document.finishPage(pdfPage)
                     }
                 }
@@ -147,6 +183,7 @@ class PdfExporter(private val context: Context) {
 
     suspend fun exportToSharedFiles(notes: List<NoteWithPages>): List<File> {
         return withContext(Dispatchers.IO) {
+            val customFonts = NoteDatabase.getDatabase(context).noteDao().getAllCustomFonts().first()
             val pdfDir = File(context.cacheDir, "pdfs")
             if (!pdfDir.exists()) pdfDir.mkdirs()
 
@@ -162,7 +199,7 @@ class PdfExporter(private val context: Context) {
                     noteWP.pages.forEach { page ->
                         val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, pageIndex++).create()
                         val pdfPage = document.startPage(pageInfo)
-                        drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight)
+                        drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight, customFonts)
                         document.finishPage(pdfPage)
                     }
                     FileOutputStream(file).use { document.writeTo(it) }
@@ -170,22 +207,6 @@ class PdfExporter(private val context: Context) {
                     file
                 } catch(e: Exception) { null }
             }
-        }
-    }
-
-    suspend fun exportSinglePageToPdf(page: PageEntity, uri: Uri) {
-        withContext(Dispatchers.IO) {
-            val pdfWidth = 1080
-            val pdfHeight = 1527
-            val document = PdfDocument()
-
-            val pageInfo = PdfDocument.PageInfo.Builder(pdfWidth, pdfHeight, 1).create()
-            val pdfPage = document.startPage(pageInfo)
-            drawPageOnPdf(page, pdfPage.canvas, pdfWidth, pdfHeight)
-            document.finishPage(pdfPage)
-
-            context.contentResolver.openOutputStream(uri)?.use { document.writeTo(it) }
-            document.close()
         }
     }
 }

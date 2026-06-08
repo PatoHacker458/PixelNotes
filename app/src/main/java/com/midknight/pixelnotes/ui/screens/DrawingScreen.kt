@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -64,16 +65,20 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -92,6 +97,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -101,6 +107,7 @@ import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.data.NoteWithPages
 import com.midknight.pixelnotes.data.PageEntity
 import com.midknight.pixelnotes.domain.PdfExporter
+import com.midknight.pixelnotes.domain.TextData
 import com.midknight.pixelnotes.ui.components.DrawingCanvas
 import com.midknight.pixelnotes.ui.viewmodels.DrawingTool
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
@@ -139,6 +146,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val customFonts by viewModel.customFonts.collectAsState()
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -198,10 +207,50 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     var showImageMenu by remember { mutableStateOf(false) }
     var showPagesPanel by remember { mutableStateOf(false) }
 
-    val listState = rememberLazyListState()
-    LaunchedEffect(listState.firstVisibleItemIndex) {
-        viewModel.activePageIndex = listState.firstVisibleItemIndex
+    // --- TEXT EDITOR STATE ---
+    var isTextEditing by remember { mutableStateOf(false) }
+    var currentTextInput by remember { mutableStateOf("") }
+    var textEditX by remember { mutableFloatStateOf(0f) }
+    var textEditY by remember { mutableFloatStateOf(0f) }
+    var textEditPageIndex by remember { mutableIntStateOf(0) }
+
+    if (isTextEditing) {
+        AlertDialog(
+            onDismissRequest = { isTextEditing = false },
+            title = { Text("Add Text") },
+            text = {
+                OutlinedTextField(
+                    value = currentTextInput,
+                    onValueChange = { currentTextInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp),
+                    placeholder = { Text("Type something...") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (currentTextInput.isNotBlank()) {
+                        viewModel.addTextToPage(
+                            pageIndex = textEditPageIndex,
+                            text = TextData(
+                                x = textEditX,
+                                y = textEditY,
+                                text = currentTextInput,
+                                colorArgb = viewModel.currentColor.toArgb(),
+                                fontSize = viewModel.currentTextSize,
+                                fontName = viewModel.currentFontName
+                            )
+                        )
+                    }
+                    isTextEditing = false
+                }) { Text("Place Text") }
+            },
+            dismissButton = { TextButton(onClick = { isTextEditing = false }) { Text("Cancel") } }
+        )
     }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState.firstVisibleItemIndex) { viewModel.activePageIndex = listState.firstVisibleItemIndex }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.surfaceVariant) { paddingValues ->
         BoxWithConstraints(modifier = Modifier.padding(paddingValues).fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
@@ -218,7 +267,6 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     if (panDelta > 3f && panDelta > zoomDelta) gestureIntent = "pan" else if (zoomDelta > 3f) gestureIntent = "zoom"
                 }
                 if (gestureIntent != "pan") scale = (scale * zoomChange).coerceIn(1f, 5f)
-
                 val maxX = (maxWidthPx * (scale - 1f)) / 2f
                 val maxY = (maxHeightPx * (scale - 1f)) / 2f
 
@@ -227,14 +275,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 if (newOffsetY > maxY) overflowY = newOffsetY - maxY
                 else if (newOffsetY < -maxY) overflowY = newOffsetY + maxY
 
-                if (overflowY != 0f) {
-                    listState.dispatchRawDelta(-overflowY)
-                }
-
-                offset = Offset(
-                    (offset.x + (offsetChange.x * 2.0f)).coerceIn(-maxX, maxX),
-                    newOffsetY.coerceIn(-maxY, maxY)
-                )
+                if (overflowY != 0f) listState.dispatchRawDelta(-overflowY)
+                offset = Offset((offset.x + (offsetChange.x * 2.0f)).coerceIn(-maxX, maxX), newOffsetY.coerceIn(-maxY, maxY))
             }
 
             LaunchedEffect(transformState.isTransformInProgress) { if (!transformState.isTransformInProgress) gestureIntent = "none" }
@@ -259,6 +301,9 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                 pageIndex = index,
                                 strokes = page.drawingData,
                                 selectedStrokes = if (viewModel.selectionPageIndex == index) viewModel.selectedStrokes else emptyList(),
+                                texts = page.textData,
+                                selectedTexts = if (viewModel.selectionPageIndex == index) viewModel.selectedTexts else emptyList(),
+                                customFonts = customFonts,
                                 isSelectionActiveOnPage = viewModel.selectionPageIndex == index,
                                 selectionMode = viewModel.selectionMode,
                                 currentColor = viewModel.currentColor,
@@ -268,6 +313,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                 fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
                                 onStrokeAdd = { stroke -> viewModel.addStrokeToPage(index, stroke) },
                                 onStrokeRemove = { stroke -> viewModel.removeStrokeFromPage(index, stroke) },
+                                onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = index; currentTextInput = ""; isTextEditing = true },
                                 onProcessSelection = { points -> viewModel.processSelection(index, points) },
                                 onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
                                 onCommitSelection = { viewModel.commitSelection() },
@@ -278,7 +324,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 }
             }
 
-            // PANEL LATERAL FLOTANTE DE PÁGINAS (Bloquea toques)
+            // PANEL LATERAL FLOTANTE DE PÁGINAS
             androidx.compose.animation.AnimatedVisibility(
                 visible = showPagesPanel,
                 enter = slideInHorizontally(initialOffsetX = { -it }),
@@ -331,18 +377,13 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     }
                                     DropdownMenu(expanded = showPageMenu, onDismissRequest = { showPageMenu = false }) {
                                         DropdownMenuItem(text = { Text("Export as PDF") }, onClick = { showPageMenu = false; singlePageToExport = viewModel.currentPages[index]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${index + 1}.pdf") })
-                                        DropdownMenuItem(text = { Text("Export as Image") }, onClick = { showPageMenu = false; Toast.makeText(context, "Coming Soon", Toast.LENGTH_SHORT).show() })
-                                        if (viewModel.currentPages.size > 1) {
-                                            DropdownMenuItem(text = { Text("Delete Page", color = MaterialTheme.colorScheme.error) }, onClick = { showPageMenu = false; viewModel.deletePageAt(index) })
-                                        }
+                                        if (viewModel.currentPages.size > 1) { DropdownMenuItem(text = { Text("Delete Page", color = MaterialTheme.colorScheme.error) }, onClick = { showPageMenu = false; viewModel.deletePageAt(index) }) }
                                     }
                                 }
                             }
                         }
                     }
-                    IconButton(onClick = { viewModel.addNewPage(); coroutineScope.launch { listState.animateScrollToItem(viewModel.currentPages.lastIndex) } }, modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add Page", tint = MaterialTheme.colorScheme.onPrimary)
-                    }
+                    IconButton(onClick = { viewModel.addNewPage(); coroutineScope.launch { listState.animateScrollToItem(viewModel.currentPages.lastIndex) } }, modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)) { Icon(Icons.Filled.Add, contentDescription = "Add Page", tint = MaterialTheme.colorScheme.onPrimary) }
                 }
             }
 
@@ -350,12 +391,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             Row(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp, start = 16.dp, end = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { viewModel.closeEditing() }) { Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                    TextField(
-                        value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it },
-                        modifier = Modifier.width(150.dp), singleLine = true,
-                        colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
-                        textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    )
+                    TextField(value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it }, modifier = Modifier.width(150.dp), singleLine = true, colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface))
                 }
 
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -363,7 +399,6 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     Spacer(modifier = Modifier.width(4.dp))
                     Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
                     Spacer(modifier = Modifier.width(4.dp))
-
                     IconButton(onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled }) { Icon(if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool, contentDescription = null, tint = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
                     Box {
                         IconButton(onClick = { showPaperMenu = true }) { Icon(Icons.Filled.GridOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
@@ -385,16 +420,13 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         DropdownMenu(expanded = showImageMenu, onDismissRequest = { showImageMenu = false }) {
                             DropdownMenuItem(text = { Text("Add Image to Page") }, onClick = { showImageMenu = false; photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
                             DropdownMenuItem(text = { Text("Remove Image") }, onClick = { showImageMenu = false; viewModel.updateActivePageBackground(null) })
-                            DropdownMenuItem(text = { Text("Import PDF") }, onClick = { showImageMenu = false; Toast.makeText(context, "Coming soon", Toast.LENGTH_SHORT).show() })
                         }
                     }
                     IconButton(onClick = { viewModel.undo() }) { Icon(Icons.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                     IconButton(onClick = { viewModel.redo() }) { Icon(Icons.Filled.Redo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                     Box {
                         IconButton(onClick = { showExportMenu = true }) { Icon(Icons.Filled.IosShare, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                        DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
-                            DropdownMenuItem(text = { Text("Export Note as PDF") }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
-                        }
+                        DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) { DropdownMenuItem(text = { Text("Export Note as PDF") }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") }) }
                     }
                 }
             }
@@ -423,20 +455,37 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
 
                         } else if (viewModel.currentTool == DrawingTool.SELECTION) {
-                            if (viewModel.selectedStrokes.isNotEmpty()) {
-                                // MODO SELECCIÓN ACTIVA: Opciones de Edición
+                            if (viewModel.selectedStrokes.isNotEmpty() || viewModel.selectedTexts.isNotEmpty()) {
                                 colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = 1.dp, color = Color.Transparent, shape = CircleShape).clickable { viewModel.changeSelectionColor(color.toArgb()) }) }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 IconButton(onClick = { viewModel.deleteSelection() }) { Icon(Icons.Filled.DeleteSweep, contentDescription = "Delete Selection", tint = MaterialTheme.colorScheme.error) }
                             } else {
-                                // MODO SELECCIÓN INACTIVA: Modos de Lazo
                                 Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Free Form", color = if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
                                 Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Rectangle", color = if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
                             }
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
 
-                        } else {
-                            Text("Tool options coming soon", color = MaterialTheme.colorScheme.outline)
+                            // MODO DE TEXTO Y FUENTES
+                        } else if (viewModel.currentTool == DrawingTool.TEXT) {
+                            var fontMenuExpanded by remember { mutableStateOf(false) }
+                            Box {
+                                Text(text = viewModel.currentFontName, modifier = Modifier.clickable { fontMenuExpanded = true }.padding(8.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                DropdownMenu(expanded = fontMenuExpanded, onDismissRequest = { fontMenuExpanded = false }) {
+                                    DropdownMenuItem(text = { Text("Default") }, onClick = { viewModel.currentFontName = "Default"; fontMenuExpanded = false })
+                                    DropdownMenuItem(text = { Text("Serif") }, onClick = { viewModel.currentFontName = "Serif"; fontMenuExpanded = false })
+                                    DropdownMenuItem(text = { Text("Monospace") }, onClick = { viewModel.currentFontName = "Monospace"; fontMenuExpanded = false })
+                                    DropdownMenuItem(text = { Text("Cursive") }, onClick = { viewModel.currentFontName = "Cursive"; fontMenuExpanded = false })
+                                    customFonts.forEach { font ->
+                                        DropdownMenuItem(text = { Text(font.name) }, onClick = { viewModel.currentFontName = font.name; fontMenuExpanded = false })
+                                    }
+                                    DropdownMenuItem(text = { Text("+ Manage Fonts", color = MaterialTheme.colorScheme.primary) }, onClick = { fontMenuExpanded = false; viewModel.closeEditing(); viewModel.currentScreen = 2 })
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("${viewModel.currentTextSize.toInt()}px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                            Slider(value = viewModel.currentTextSize, onValueChange = { viewModel.currentTextSize = it }, valueRange = 20f..150f, modifier = Modifier.width(100.dp))
                             IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) }
                         }
                     }

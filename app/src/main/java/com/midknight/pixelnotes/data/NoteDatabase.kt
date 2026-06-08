@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Note::class, PageEntity::class, FolderEntity::class], version = 8, exportSchema = false)
+@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 9, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class NoteDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
@@ -55,14 +55,23 @@ abstract class NoteDatabase : RoomDatabase() {
             }
         }
 
-        fun getDatabase(context: Context): NoteDatabase {
+        private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Añadir soporte para textos flotantes a las páginas existentes
+                database.execSQL("ALTER TABLE `pages` ADD COLUMN `textData` TEXT NOT NULL DEFAULT '[]'")
+                // Crear la tabla para el gestor de fuentes instaladas
+                database.execSQL("CREATE TABLE IF NOT EXISTS `custom_fonts` (`name` TEXT NOT NULL, `fileName` TEXT NOT NULL, PRIMARY KEY(`name`))")
+            }
+        }
+
+        fun getDatabase(context: android.content.Context): NoteDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                val instance = androidx.room.Room.databaseBuilder(
                     context.applicationContext,
                     NoteDatabase::class.java,
                     "pixel_notes_database"
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
