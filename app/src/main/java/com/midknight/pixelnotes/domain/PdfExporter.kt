@@ -25,7 +25,10 @@ import java.io.FileOutputStream
 class PdfExporter(private val context: Context) {
 
     private fun drawPageOnPdf(page: PageEntity, pdfCanvas: Canvas, pdfWidth: Int, pdfHeight: Int, customFonts: List<CustomFont>) {
-        val bgPaint = Paint().apply { color = if (page.canvasColor == -1) android.graphics.Color.WHITE else page.canvasColor; style = Paint.Style.FILL }
+        val bgPaint = Paint().apply {
+            color = if (page.canvasColor == -1) android.graphics.Color.WHITE else page.canvasColor
+            style = Paint.Style.FILL
+        }
         pdfCanvas.drawRect(0f, 0f, pdfWidth.toFloat(), pdfHeight.toFloat(), bgPaint)
 
         if (page.backgroundUri != null) {
@@ -50,7 +53,9 @@ class PdfExporter(private val context: Context) {
                         renderer.close()
                         fd.close()
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             } else {
                 try {
                     val bgUri = Uri.parse(page.backgroundUri)
@@ -59,11 +64,21 @@ class PdfExporter(private val context: Context) {
                         if (bitmap != null) {
                             val targetRatio = pdfWidth.toFloat() / pdfHeight.toFloat()
                             val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-                            val srcRect = if (bitmapRatio > targetRatio) { val newWidth = (bitmap.height * targetRatio).toInt(); val xOffset = (bitmap.width - newWidth) / 2; Rect(xOffset, 0, xOffset + newWidth, bitmap.height) } else { val newHeight = (bitmap.width / targetRatio).toInt(); val yOffset = (bitmap.height - newHeight) / 2; Rect(0, yOffset, bitmap.width, yOffset + newHeight) }
+                            val srcRect = if (bitmapRatio > targetRatio) {
+                                val newWidth = (bitmap.height * targetRatio).toInt()
+                                val xOffset = (bitmap.width - newWidth) / 2
+                                Rect(xOffset, 0, xOffset + newWidth, bitmap.height)
+                            } else {
+                                val newHeight = (bitmap.width / targetRatio).toInt()
+                                val yOffset = (bitmap.height - newHeight) / 2
+                                Rect(0, yOffset, bitmap.width, yOffset + newHeight)
+                            }
                             pdfCanvas.drawBitmap(bitmap, srcRect, Rect(0, 0, pdfWidth, pdfHeight), null)
                         }
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
 
@@ -78,32 +93,68 @@ class PdfExporter(private val context: Context) {
                         bitmap.recycle()
                     }
                 }
-            } catch (e: Exception) { e.printStackTrace() }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
 
         val strokeBitmap = Bitmap.createBitmap(pdfWidth, pdfHeight, Bitmap.Config.ARGB_8888)
         val strokeCanvas = Canvas(strokeBitmap)
-        val paint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
+        val paint = Paint().apply {
+            isAntiAlias = true
+            style = Paint.Style.STROKE
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+        }
         val clearXfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+
         page.drawingData.forEach { strokeData ->
-            if (strokeData.isEraser) { paint.xfermode = clearXfermode; paint.color = android.graphics.Color.TRANSPARENT } else { paint.xfermode = null; paint.color = strokeData.colorArgb }
+            if (strokeData.isEraser) {
+                paint.xfermode = clearXfermode
+                paint.color = android.graphics.Color.TRANSPARENT
+            } else {
+                paint.xfermode = null
+                paint.color = strokeData.colorArgb
+            }
             paint.strokeWidth = strokeData.strokeWidth
             val path = android.graphics.Path()
             if (strokeData.points.isNotEmpty()) {
                 path.moveTo(strokeData.points.first().x, strokeData.points.first().y)
-                var prevX = strokeData.points.first().x; var prevY = strokeData.points.first().y
-                for (i in 1 until strokeData.points.size) { val currentX = strokeData.points[i].x; val currentY = strokeData.points[i].y; val midX = (prevX + currentX) / 2f; val midY = (prevY + currentY) / 2f; path.quadTo(prevX, prevY, midX, midY); prevX = currentX; prevY = currentY }
-                path.lineTo(prevX, prevY)
+
+                if (strokeData.points.size <= 10 || strokeData.points.size == 37) {
+                    for (i in 1 until strokeData.points.size) {
+                        path.lineTo(strokeData.points[i].x, strokeData.points[i].y)
+                    }
+                } else {
+                    var prevX = strokeData.points.first().x
+                    var prevY = strokeData.points.first().y
+                    for (i in 1 until strokeData.points.size) {
+                        val currentX = strokeData.points[i].x
+                        val currentY = strokeData.points[i].y
+                        val midX = (prevX + currentX) / 2f
+                        val midY = (prevY + currentY) / 2f
+                        path.quadTo(prevX, prevY, midX, midY)
+                        prevX = currentX
+                        prevY = currentY
+                    }
+                    path.lineTo(prevX, prevY)
+                }
             }
             strokeCanvas.drawPath(path, paint)
         }
+
         pdfCanvas.drawBitmap(strokeBitmap, 0f, 0f, null)
         strokeBitmap.recycle()
 
         page.textData.forEach { textData ->
             val fontInfo = customFonts.find { it.name == textData.fontName }
             val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName)
-            val textPaint = Paint().apply { color = textData.colorArgb; textSize = textData.fontSize; typeface = tf; isAntiAlias = true }
+            val textPaint = Paint().apply {
+                color = textData.colorArgb
+                textSize = textData.fontSize
+                typeface = tf
+                isAntiAlias = true
+            }
             pdfCanvas.drawText(textData.text, textData.x, textData.y, textPaint)
         }
     }

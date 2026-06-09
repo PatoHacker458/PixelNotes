@@ -1,9 +1,7 @@
 package com.midknight.pixelnotes.domain
 
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.toArgb
 
 data class PointData(val x: Float, val y: Float)
 
@@ -13,12 +11,19 @@ data class StrokeData(
     val strokeWidth: Float,
     val isEraser: Boolean = false,
     val isHighlighter: Boolean = false,
-    val shapeType: Int = 0 // 0 = Freehand, 1 = Line, 2 = Rectangle, 3 = Circle, 4 = Triangle
+    val shapeType: Int = 0
 ) {
     fun toPath(): Path {
         val path = Path()
-        if (points.isNotEmpty()) {
-            path.moveTo(points.first().x, points.first().y)
+        if (points.isEmpty()) return path
+
+        path.moveTo(points.first().x, points.first().y)
+
+        if (points.size <= 10 || points.size == 37) {
+            for (i in 1 until points.size) {
+                path.lineTo(points[i].x, points[i].y)
+            }
+        } else {
             var prevX = points.first().x
             var prevY = points.first().y
 
@@ -57,7 +62,6 @@ data class StrokeData(
     }
 }
 
-// Geometría: Algoritmo de Ray-casting
 fun isPointInPolygon(point: PointData, polygon: List<PointData>): Boolean {
     var isInside = false
     var j = polygon.size - 1
