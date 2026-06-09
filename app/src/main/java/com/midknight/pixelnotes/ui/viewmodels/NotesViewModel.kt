@@ -126,10 +126,18 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     }
 
     fun moveSelection(dx: Float, dy: Float) {
-        selectedStrokes.clear(); selectedStrokes.addAll(selectedStrokes.map { it.translate(dx, dy) })
-        selectedTexts.clear(); selectedTexts.addAll(selectedTexts.map { it.copy(x = it.x + dx, y = it.y + dy) })
+        val movedStrokes = selectedStrokes.map { it.translate(dx, dy) }
+        val movedTexts = selectedTexts.map { it.copy(x = it.x + dx, y = it.y + dy) }
         val movedImages = selectedImages.map { it.copy(x = it.x + dx, y = it.y + dy) }
-        selectedImages.clear(); selectedImages.addAll(movedImages)
+
+        selectedStrokes.clear()
+        selectedStrokes.addAll(movedStrokes)
+
+        selectedTexts.clear()
+        selectedTexts.addAll(movedTexts)
+
+        selectedImages.clear()
+        selectedImages.addAll(movedImages)
     }
 
     fun scaleSelection(scaleFactor: Float, pivotX: Float, pivotY: Float) {
@@ -175,7 +183,16 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     }
 
     fun deleteSelection() { selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1 }
-    fun changeSelectionColor(newColorArgb: Int) { selectedStrokes.clear(); selectedStrokes.addAll(selectedStrokes.map { it.copy(colorArgb = newColorArgb) }); selectedTexts.clear(); selectedTexts.addAll(selectedTexts.map { it.copy(colorArgb = newColorArgb) }) }
+    fun changeSelectionColor(newColorArgb: Int) {
+        val coloredStrokes = selectedStrokes.map { it.copy(colorArgb = newColorArgb) }
+        val coloredTexts = selectedTexts.map { it.copy(colorArgb = newColorArgb) }
+
+        selectedStrokes.clear()
+        selectedStrokes.addAll(coloredStrokes)
+
+        selectedTexts.clear()
+        selectedTexts.addAll(coloredTexts)
+    }
     // --- PAGE MANAGEMENT ---
     fun addNewPage() { commitSelection(); currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = currentPages.size)); activePageIndex = currentPages.lastIndex }
     fun deletePageAt(index: Int) { commitSelection(); if (currentPages.size > 1) { currentPages.removeAt(index); if (activePageIndex >= currentPages.size) activePageIndex = currentPages.size - 1 } }
