@@ -93,7 +93,14 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = { viewModel.showDeleteDialog = false },
                         title = { Text(if (isTrash) "Delete Permanently" else "Move to Trash") },
                         text = { Text(if (isTrash) "These ${viewModel.selectedNotes.size} notes will be deleted forever." else "Move ${viewModel.selectedNotes.size} notes to the trash?") },
-                        confirmButton = { TextButton(onClick = { if (isTrash) viewModel.permanentlyDeleteSelected() else viewModel.moveToTrash(); viewModel.showDeleteDialog = false }) { Text(if (isTrash) "Delete", color = MaterialTheme.colorScheme.error) else Text("Move", color = MaterialTheme.colorScheme.error) } },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                if (isTrash) viewModel.permanentlyDeleteSelected() else viewModel.moveToTrash()
+                                viewModel.showDeleteDialog = false
+                            }) {
+                                Text(if (isTrash) "Delete" else "Move", color = MaterialTheme.colorScheme.error)
+                            }
+                        },
                         dismissButton = { TextButton(onClick = { viewModel.showDeleteDialog = false }) { Text("Cancel") } }
                     )
                 }

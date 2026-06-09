@@ -3,7 +3,7 @@ package com.midknight.pixelnotes.domain
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Path
 
-data class PointData(val x: Float, val y: Float)
+data class PointData(val x: Float, val y: Float, val p: Float = 1f)
 
 data class StrokeData(
     val points: List<PointData>,
@@ -58,7 +58,7 @@ data class StrokeData(
     }
 
     fun translate(dx: Float, dy: Float): StrokeData {
-        return this.copy(points = points.map { PointData(it.x + dx, it.y + dy) })
+        return this.copy(points = points.map { PointData(it.x + dx, it.y + dy, it.p) })
     }
 }
 

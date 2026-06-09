@@ -1,6 +1,11 @@
 package com.midknight.pixelnotes.domain
 
-import kotlin.math.*
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.sin
 
 fun detectAndSnapShape(points: List<PointData>): List<PointData>? {
     if (points.size < 10) return null
@@ -8,10 +13,9 @@ fun detectAndSnapShape(points: List<PointData>): List<PointData>? {
     val start = points.first()
     val end = points.last()
 
-    // 1. ¿ES UNA LÍNEA RECTA?
     var pathLength = 0f
     for (i in 0 until points.size - 1) {
-        pathLength += hypot(points[i+1].x - points[i].x, points[i+1].y - points[i].y)
+        pathLength += hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y)
     }
     val straightDist = hypot(end.x - start.x, end.y - start.y)
 
@@ -19,19 +23,24 @@ fun detectAndSnapShape(points: List<PointData>): List<PointData>? {
         return listOf(start, end)
     }
 
-    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE
-    var maxX = Float.MIN_VALUE; var maxY = Float.MIN_VALUE
+    var minX = Float.MAX_VALUE
+    var minY = Float.MAX_VALUE
+    var maxX = Float.MIN_VALUE
+    var maxY = Float.MIN_VALUE
+
     points.forEach { p ->
-        if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y
-        if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y
+        if (p.x < minX) minX = p.x
+        if (p.y < minY) minY = p.y
+        if (p.x > maxX) maxX = p.x
+        if (p.y > maxY) maxY = p.y
     }
+
     val w = maxX - minX
     val h = maxY - minY
     val cx = minX + w / 2f
     val cy = minY + h / 2f
 
     if (straightDist < max(w, h) * 0.35f && w > 30f && h > 30f) {
-
         val epsilon = max(w, h) * 0.09f
         val simplified = simplifyPath(points, epsilon).toMutableList()
 
@@ -40,13 +49,12 @@ fun detectAndSnapShape(points: List<PointData>): List<PointData>? {
         val edges = simplified.size - 1
 
         if (edges in 3..5) {
-
             if (edges == 4) {
                 var isAxisAligned = true
                 for (i in 0 until 4) {
-                    val dx = abs(simplified[i+1].x - simplified[i].x)
-                    val dy = abs(simplified[i+1].y - simplified[i].y)
-                    // Si dibujó un "diamante" inclinado, respetamos su inclinación
+                    val dx = abs(simplified[i + 1].x - simplified[i].x)
+                    val dy = abs(simplified[i + 1].y - simplified[i].y)
+
                     if (dx > w * 0.2f && dy > h * 0.2f) {
                         isAxisAligned = false
                         break
@@ -54,21 +62,26 @@ fun detectAndSnapShape(points: List<PointData>): List<PointData>? {
                 }
                 if (isAxisAligned) {
                     return listOf(
-                        PointData(minX, minY), PointData(maxX, minY),
-                        PointData(maxX, maxY), PointData(minX, maxY),
-                        PointData(minX, minY)
+                        PointData(minX, minY, 1f), PointData(maxX, minY, 1f),
+                        PointData(maxX, maxY, 1f), PointData(minX, maxY, 1f),
+                        PointData(minX, minY, 1f)
                     )
                 }
             }
             return simplified
-
         } else {
             val ovalPoints = mutableListOf<PointData>()
             val a = w / 2f
             val b = h / 2f
             for (i in 0..36) {
                 val angle = i * 10.0 * PI / 180.0
-                ovalPoints.add(PointData((cx + a * cos(angle)).toFloat(), (cy + b * sin(angle)).toFloat()))
+                ovalPoints.add(
+                    PointData(
+                        (cx + a * cos(angle)).toFloat(),
+                        (cy + b * sin(angle)).toFloat(),
+                        1f
+                    )
+                )
             }
             return ovalPoints
         }

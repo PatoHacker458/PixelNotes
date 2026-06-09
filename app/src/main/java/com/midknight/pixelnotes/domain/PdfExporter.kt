@@ -116,31 +116,47 @@ class PdfExporter(private val context: Context) {
                 paint.xfermode = null
                 paint.color = strokeData.colorArgb
             }
-            paint.strokeWidth = strokeData.strokeWidth
-            val path = android.graphics.Path()
-            if (strokeData.points.isNotEmpty()) {
-                path.moveTo(strokeData.points.first().x, strokeData.points.first().y)
 
-                if (strokeData.points.size <= 10 || strokeData.points.size == 37) {
-                    for (i in 1 until strokeData.points.size) {
-                        path.lineTo(strokeData.points[i].x, strokeData.points[i].y)
+            val isShape = strokeData.points.size <= 10 || strokeData.points.size == 37
+
+            if (isShape || strokeData.isHighlighter) {
+                paint.strokeWidth = strokeData.strokeWidth
+                val path = android.graphics.Path()
+                if (strokeData.points.isNotEmpty()) {
+                    path.moveTo(strokeData.points.first().x, strokeData.points.first().y)
+                    if (isShape) {
+                        for (i in 1 until strokeData.points.size) {
+                            path.lineTo(strokeData.points[i].x, strokeData.points[i].y)
+                        }
+                    } else {
+                        var prevX = strokeData.points.first().x
+                        var prevY = strokeData.points.first().y
+                        for (i in 1 until strokeData.points.size) {
+                            val currentX = strokeData.points[i].x
+                            val currentY = strokeData.points[i].y
+                            val midX = (prevX + currentX) / 2f
+                            val midY = (prevY + currentY) / 2f
+                            path.quadTo(prevX, prevY, midX, midY)
+                            prevX = currentX
+                            prevY = currentY
+                        }
+                        path.lineTo(prevX, prevY)
                     }
-                } else {
-                    var prevX = strokeData.points.first().x
-                    var prevY = strokeData.points.first().y
+                }
+                strokeCanvas.drawPath(path, paint)
+            } else {
+                if (strokeData.points.isNotEmpty()) {
+                    var prev = strokeData.points.first()
                     for (i in 1 until strokeData.points.size) {
-                        val currentX = strokeData.points[i].x
-                        val currentY = strokeData.points[i].y
-                        val midX = (prevX + currentX) / 2f
-                        val midY = (prevY + currentY) / 2f
-                        path.quadTo(prevX, prevY, midX, midY)
-                        prevX = currentX
-                        prevY = currentY
+                        val curr = strokeData.points[i]
+                        val p1 = if (prev.p <= 0f) 1f else prev.p
+                        val p2 = if (curr.p <= 0f) 1f else curr.p
+                        paint.strokeWidth = strokeData.strokeWidth * ((p1 + p2) / 2f)
+                        strokeCanvas.drawLine(prev.x, prev.y, curr.x, curr.y, paint)
+                        prev = curr
                     }
-                    path.lineTo(prevX, prevY)
                 }
             }
-            strokeCanvas.drawPath(path, paint)
         }
 
         pdfCanvas.drawBitmap(strokeBitmap, 0f, 0f, null)

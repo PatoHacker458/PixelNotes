@@ -116,10 +116,10 @@ fun DrawingCanvas(
                         }
                     }
                     onCommitSelection()
-                    val path = Path().apply { moveTo(touchX, touchY) }; val points = mutableListOf(PointData(touchX, touchY)); currentPath = path; currentPoints = points; var prevX = touchX; var prevY = touchY
+                    val path = Path().apply { moveTo(touchX, touchY) }; val points = mutableListOf(PointData(touchX, touchY, 1f)); currentPath = path; currentPoints = points; var prevX = touchX; var prevY = touchY
                     do {
                         val event = awaitPointerEvent(); val change = event.changes.firstOrNull { it.id == down.id }
-                        if (change != null && change.pressed) { change.consume(); val x = change.position.x / scaleRatio; val y = change.position.y / scaleRatio; path.lineTo(x, y); points.add(PointData(x, y)); prevX = x; prevY = y; trigger++ }
+                        if (change != null && change.pressed) { change.consume(); val x = change.position.x / scaleRatio; val y = change.position.y / scaleRatio; path.lineTo(x, y); points.add(PointData(x, y, 1f)); prevX = x; prevY = y; trigger++ }
                     } while (event.changes.any { it.pressed })
                     if (updatedSelectionMode == 0 && points.size > 2) path.lineTo(points.first().x, points.first().y)
                     onProcessSelection(points.toList()); currentPath = null; currentPoints = mutableListOf()
@@ -138,22 +138,24 @@ fun DrawingCanvas(
                     return@awaitEachGesture
                 }
 
-                val startX = down.position.x / scaleRatio; val startY = down.position.y / scaleRatio
+                val startX = down.position.x / scaleRatio
+                val startY = down.position.y / scaleRatio
+                val startP = if (down.type == PointerType.Stylus) down.pressure else 1f
+
                 val path = Path().apply { moveTo(startX, startY) }
-                val points = mutableListOf(PointData(startX, startY))
-                var prevX = startX; var prevY = startY
+                val points = mutableListOf(PointData(startX, startY, startP))
+                var prevX = startX
+                var prevY = startY
 
                 if (isAllowedTouch && updatedTool != DrawingTool.TEXT) { currentPath = path; currentPoints = points }
 
                 var isZooming = false
-                var isHoldingShape = false // <-- BANDERA PARA AUTO-SHAPE
+                var isHoldingShape = false
 
                 do {
-                    // AQUÍ ESTÁ LA MAGIA: Esperamos hasta 500 milisegundos
                     val event = withTimeoutOrNull(500) { awaitPointerEvent() }
 
                     if (event == null) {
-                        // Si event es null, significa que pasaron 500ms y no moviste el dedo. ¡ACTIVAR AUTO-SHAPE!
                         if (!isHoldingShape && !isZooming && isAllowedTouch && updatedTool != DrawingTool.TEXT && points.size > 15) {
                             val perfectShape = detectAndSnapShape(points)
                             if (perfectShape != null) {
@@ -168,21 +170,34 @@ fun DrawingCanvas(
                             }
                         }
                     } else {
-                        // Si event NO es null, el dedo se sigue moviendo o levantando normalmente
                         if (event.changes.size > 1) isZooming = true
                         if (!isZooming && isAllowedTouch && updatedTool != DrawingTool.TEXT) {
                             val change = event.changes.firstOrNull { it.id == down.id }
                             if (change != null && change.pressed) {
                                 change.consume()
-                                if (!isHoldingShape) { // Solo dibujar si NO se ha activado la figura perfecta
+                                if (!isHoldingShape) {
+                                    change.historical.forEach { hist ->
+                                        val hx = hist.position.x / scaleRatio
+                                        val hy = hist.position.y / scaleRatio
+                                        val hp = if (change.type == PointerType.Stylus) change.pressure else 1f
+                                        points.add(PointData(hx, hy, hp))
+                                        val midX = (prevX + hx) / 2f
+                                        val midY = (prevY + hy) / 2f
+                                        path.quadraticBezierTo(prevX, prevY, midX, midY)
+                                        prevX = hx
+                                        prevY = hy
+                                    }
+
                                     val x = change.position.x / scaleRatio
                                     val y = change.position.y / scaleRatio
+                                    val p = if (change.type == PointerType.Stylus) change.pressure else 1f
+
+                                    points.add(PointData(x, y, p))
                                     val midX = (prevX + x) / 2f
                                     val midY = (prevY + y) / 2f
                                     path.quadraticBezierTo(prevX, prevY, midX, midY)
                                     prevX = x
                                     prevY = y
-                                    points.add(PointData(x, y))
                                     trigger++
                                 }
                             }
@@ -203,12 +218,55 @@ fun DrawingCanvas(
     ) {
         trigger; val virtualWidth = 1080f; val scaleRatio = size.width / virtualWidth
         withTransform({ scale(scaleX = scaleRatio, scaleY = scaleRatio, pivot = Offset.Zero) }) {
+
             baseImagePainters.forEach { (img, painter) -> translate(left = img.x, top = img.y) { with(painter) { draw(size = Size(img.width, img.height)) } } }
-            strokes.forEach { strokeData -> val color = if (strokeData.isEraser) Color.Transparent else Color(strokeData.colorArgb).copy(alpha = if (strokeData.isHighlighter) 0.4f else 1f); val blend = if (strokeData.isEraser) BlendMode.Clear else if (strokeData.isHighlighter) BlendMode.Multiply else BlendMode.SrcOver; drawPath(path = strokeData.toPath(), color = color, style = Stroke(width = strokeData.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend) }
+
+            strokes.forEach { strokeData ->
+                val color = if (strokeData.isEraser) Color.Transparent else Color(strokeData.colorArgb).copy(alpha = if (strokeData.isHighlighter) 0.4f else 1f)
+                val blend = if (strokeData.isEraser) BlendMode.Clear else if (strokeData.isHighlighter) BlendMode.Multiply else BlendMode.SrcOver
+
+                val isShape = strokeData.points.size <= 10 || strokeData.points.size == 37
+                if (isShape || strokeData.isHighlighter) {
+                    drawPath(path = strokeData.toPath(), color = color, style = Stroke(width = strokeData.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend)
+                } else {
+                    if (strokeData.points.isNotEmpty()) {
+                        var prev = strokeData.points.first()
+                        for (i in 1 until strokeData.points.size) {
+                            val curr = strokeData.points[i]
+                            val p1 = if (prev.p <= 0f) 1f else prev.p
+                            val p2 = if (curr.p <= 0f) 1f else curr.p
+                            val width = strokeData.strokeWidth * ((p1 + p2) / 2f)
+                            drawLine(color = color, start = Offset(prev.x, prev.y), end = Offset(curr.x, curr.y), strokeWidth = width, cap = StrokeCap.Round, blendMode = blend)
+                            prev = curr
+                        }
+                    }
+                }
+            }
+
             texts.forEach { textData -> val fontInfo = customFonts.find { it.name == textData.fontName }; val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName); drawContext.canvas.nativeCanvas.apply { val paint = android.graphics.Paint().apply { color = textData.colorArgb; textSize = textData.fontSize; typeface = tf; isAntiAlias = true }; drawText(textData.text, textData.x, textData.y, paint) } }
 
             if (updatedIsSelectionActive) {
-                updatedSelectedStrokes.forEach { strokeData -> val color = Color(strokeData.colorArgb).copy(alpha = if (strokeData.isHighlighter) 0.4f else 1f); drawPath(path = strokeData.toPath(), color = color, style = Stroke(width = strokeData.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = if (strokeData.isHighlighter) BlendMode.Multiply else BlendMode.SrcOver) }
+                updatedSelectedStrokes.forEach { strokeData ->
+                    val color = Color(strokeData.colorArgb).copy(alpha = if (strokeData.isHighlighter) 0.4f else 1f)
+                    val blend = if (strokeData.isHighlighter) BlendMode.Multiply else BlendMode.SrcOver
+                    val isShape = strokeData.points.size <= 10 || strokeData.points.size == 37
+                    if (isShape || strokeData.isHighlighter) {
+                        drawPath(path = strokeData.toPath(), color = color, style = Stroke(width = strokeData.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend)
+                    } else {
+                        if (strokeData.points.isNotEmpty()) {
+                            var prev = strokeData.points.first()
+                            for (i in 1 until strokeData.points.size) {
+                                val curr = strokeData.points[i]
+                                val p1 = if (prev.p <= 0f) 1f else prev.p
+                                val p2 = if (curr.p <= 0f) 1f else curr.p
+                                val width = strokeData.strokeWidth * ((p1 + p2) / 2f)
+                                drawLine(color = color, start = Offset(prev.x, prev.y), end = Offset(curr.x, curr.y), strokeWidth = width, cap = StrokeCap.Round, blendMode = blend)
+                                prev = curr
+                            }
+                        }
+                    }
+                }
+
                 updatedSelectedTexts.forEach { textData -> val fontInfo = customFonts.find { it.name == textData.fontName }; val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName); drawContext.canvas.nativeCanvas.apply { val paint = android.graphics.Paint().apply { color = textData.colorArgb; textSize = textData.fontSize; typeface = tf; isAntiAlias = true; alpha = 128 }; drawText(textData.text, textData.x, textData.y, paint) } }
                 selectedImagePainters.forEach { (img, painter) -> translate(left = img.x, top = img.y) { with(painter) { draw(size = Size(img.width, img.height), alpha = 0.5f) } } }
 
@@ -230,7 +288,23 @@ fun DrawingCanvas(
                 } else {
                     val color = if (currentIsEraser) Color.Transparent else updatedColor.copy(alpha = if (updatedTool == DrawingTool.HIGHLIGHTER) 0.4f else 1f)
                     val blend = if (currentIsEraser) BlendMode.Clear else if (updatedTool == DrawingTool.HIGHLIGHTER) BlendMode.Multiply else BlendMode.SrcOver
-                    drawPath(path = path, color = color, style = Stroke(width = updatedStrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend)
+
+                    val isLiveShape = currentPoints.size <= 10 || currentPoints.size == 37
+                    if (updatedTool == DrawingTool.HIGHLIGHTER || isLiveShape) {
+                        drawPath(path = path, color = color, style = Stroke(width = updatedStrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend)
+                    } else {
+                        if (currentPoints.isNotEmpty()) {
+                            var prev = currentPoints.first()
+                            for (i in 1 until currentPoints.size) {
+                                val curr = currentPoints[i]
+                                val p1 = if (prev.p <= 0f) 1f else prev.p
+                                val p2 = if (curr.p <= 0f) 1f else curr.p
+                                val width = updatedStrokeWidth * ((p1 + p2) / 2f)
+                                drawLine(color = color, start = Offset(prev.x, prev.y), end = Offset(curr.x, curr.y), strokeWidth = width, cap = StrokeCap.Round, blendMode = blend)
+                                prev = curr
+                            }
+                        }
+                    }
                 }
             }
         }
