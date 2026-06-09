@@ -83,45 +83,90 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     }
 
     fun addFloatingImageToPage(pageIndex: Int, uri: String) {
-        commitSelection()
-        val page = currentPages[pageIndex]
+        setTool(DrawingTool.SELECTION)
         val newImage = com.midknight.pixelnotes.domain.ImageData(
             x = 100f, y = 100f, width = 600f, height = 600f, uri = uri
         )
-        currentPages[pageIndex] = page.copy(imageData = page.imageData + newImage)
-        undoStack.add(EditorAction(pageIndex, null, null, newImage, true))
-        redoStack.clear()
+        selectedImages.add(newImage)
+        selectionPageIndex = pageIndex
         activePageIndex = pageIndex
     }
 
     // --- TEXT & SELECTION ENGINE ---
     val selectedImages = mutableStateListOf<com.midknight.pixelnotes.domain.ImageData>() // NUEVO
 
-    fun addTextToPage(pageIndex: Int, text: TextData) { commitSelection(); val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(textData = page.textData + text); undoStack.add(EditorAction(pageIndex, null, text, null, true)); redoStack.clear(); activePageIndex = pageIndex }
-    fun setTool(tool: DrawingTool) { if (currentTool == DrawingTool.SELECTION && tool != DrawingTool.SELECTION) commitSelection(); currentTool = tool }
+    fun addTextToPage(pageIndex: Int, text: TextData) {
+        setTool(DrawingTool.SELECTION)
+        selectedTexts.add(text)
+        selectionPageIndex = pageIndex
+        activePageIndex = pageIndex
+    }    fun setTool(tool: DrawingTool) { if (currentTool == DrawingTool.SELECTION && tool != DrawingTool.SELECTION) commitSelection(); currentTool = tool }
 
     fun processSelection(pageIndex: Int, pathPoints: List<PointData>) {
         commitSelection()
         if (pathPoints.size < 3) return
         val page = currentPages[pageIndex]
+        val strokesToSelect = mutableListOf<StrokeData>()
+        val remainingStrokes = mutableListOf<StrokeData>()
+        page.drawingData.forEach { stroke ->
+            val isSelected = stroke.points.any { p ->
+                if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last())
+            }
+            if (isSelected && !stroke.isEraser) strokesToSelect.add(stroke) else remainingStrokes.add(stroke)
+        }
 
-        val strokesToSelect = mutableListOf<StrokeData>(); val remainingStrokes = mutableListOf<StrokeData>()
-        page.drawingData.forEach { stroke -> val isSelected = stroke.points.any { p -> if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last()) }; if (isSelected && !stroke.isEraser) strokesToSelect.add(stroke) else remainingStrokes.add(stroke) }
+        val textsToSelect = mutableListOf<TextData>()
+        val remainingTexts = mutableListOf<TextData>()
+        page.textData.forEach { text ->
+            val textWidth = text.text.length * (text.fontSize * 0.6f) // Ancho aproximado
+            val textHeight = text.fontSize
+            val corners = listOf(
+                PointData(text.x, text.y - textHeight),
+                PointData(text.x + textWidth, text.y - textHeight),
+                PointData(text.x, text.y),
+                PointData(text.x + textWidth, text.y)
+            )
+            var isSelected = corners.any { p ->
+                if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last())
+            }
+            if (!isSelected) {
+                isSelected = pathPoints.any { p ->
+                    p.x >= text.x && p.x <= text.x + textWidth && p.y >= text.y - textHeight && p.y <= text.y
+                }
+            }
+            if (isSelected) textsToSelect.add(text) else remainingTexts.add(text)
+        }
 
-        val textsToSelect = mutableListOf<TextData>(); val remainingTexts = mutableListOf<TextData>()
-        page.textData.forEach { text -> val isSelected = if (selectionMode == 0) isPointInPolygon(PointData(text.x, text.y), pathPoints) else isPointInRect(PointData(text.x, text.y), pathPoints.first(), pathPoints.last()); if (isSelected) textsToSelect.add(text) else remainingTexts.add(text) }
-
-        val imagesToSelect = mutableListOf<com.midknight.pixelnotes.domain.ImageData>(); val remainingImages = mutableListOf<com.midknight.pixelnotes.domain.ImageData>()
+        val imagesToSelect = mutableListOf<com.midknight.pixelnotes.domain.ImageData>()
+        val remainingImages = mutableListOf<com.midknight.pixelnotes.domain.ImageData>()
         page.imageData.forEach { img ->
-            val corners = listOf(PointData(img.x, img.y), PointData(img.x + img.width, img.y), PointData(img.x, img.y + img.height), PointData(img.x + img.width, img.y + img.height))
-            val isSelected = corners.any { p -> if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last()) }
+            val corners = listOf(
+                PointData(img.x, img.y),
+                PointData(img.x + img.width, img.y),
+                PointData(img.x, img.y + img.height),
+                PointData(img.x + img.width, img.y + img.height)
+            )
+            var isSelected = corners.any { p ->
+                if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last())
+            }
+            if (!isSelected) {
+                isSelected = pathPoints.any { p ->
+                    p.x >= img.x && p.x <= img.x + img.width && p.y >= img.y && p.y <= img.y + img.height
+                }
+            }
             if (isSelected) imagesToSelect.add(img) else remainingImages.add(img)
         }
 
         if (strokesToSelect.isNotEmpty() || textsToSelect.isNotEmpty() || imagesToSelect.isNotEmpty()) {
-            selectedStrokes.addAll(strokesToSelect); selectedTexts.addAll(textsToSelect); selectedImages.addAll(imagesToSelect)
+            selectedStrokes.addAll(strokesToSelect)
+            selectedTexts.addAll(textsToSelect)
+            selectedImages.addAll(imagesToSelect)
             selectionPageIndex = pageIndex
-            currentPages[pageIndex] = page.copy(drawingData = remainingStrokes, textData = remainingTexts, imageData = remainingImages)
+            currentPages[pageIndex] = page.copy(
+                drawingData = remainingStrokes,
+                textData = remainingTexts,
+                imageData = remainingImages
+            )
         }
     }
 
