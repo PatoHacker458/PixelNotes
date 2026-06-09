@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Relation
 import com.midknight.pixelnotes.domain.StrokeData
 import com.midknight.pixelnotes.domain.TextData
+import com.midknight.pixelnotes.domain.ImageData
 
 @Entity(tableName = "notes")
 data class Note(
@@ -14,7 +15,8 @@ data class Note(
     val title: String,
     val content: String,
     val date: String,
-    val folder: String = "General"
+    val folder: String = "General",
+    val inTrash: Boolean = false
 )
 
 @Entity(tableName = "pages")
@@ -25,7 +27,7 @@ data class PageEntity(
     val pageNumber: Int,
     val drawingData: List<StrokeData> = emptyList(),
     val textData: List<TextData> = emptyList(),
-    val imageData: List<com.midknight.pixelnotes.domain.ImageData> = emptyList(),
+    val imageData: List<ImageData> = emptyList(),
     val backgroundUri: String? = null,
     val paperStyle: Int = 0,
     val canvasColor: Int = -1
@@ -40,9 +42,8 @@ data class NoteWithPages(
     val pages: List<PageEntity>
 )
 
-// NUEVO: Entidad para el gestor de fuentes
 @Entity(tableName = "custom_fonts")
 data class CustomFont(
     @PrimaryKey val name: String,
-    val fileName: String // El archivo guardado en el almacenamiento interno
+    val fileName: String
 )

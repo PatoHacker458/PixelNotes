@@ -88,11 +88,12 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (viewModel.showDeleteDialog) {
+                    val isTrash = viewModel.currentFolderFilter == "Trash"
                     AlertDialog(
                         onDismissRequest = { viewModel.showDeleteDialog = false },
-                        title = { Text("Delete Notes") },
-                        text = { Text("Delete ${viewModel.selectedNotes.size} selected notes?") },
-                        confirmButton = { TextButton(onClick = { viewModel.deleteSelectedNotes(); viewModel.showDeleteDialog = false }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+                        title = { Text(if (isTrash) "Delete Permanently" else "Move to Trash") },
+                        text = { Text(if (isTrash) "These ${viewModel.selectedNotes.size} notes will be deleted forever." else "Move ${viewModel.selectedNotes.size} notes to the trash?") },
+                        confirmButton = { TextButton(onClick = { if (isTrash) viewModel.permanentlyDeleteSelected() else viewModel.moveToTrash(); viewModel.showDeleteDialog = false }) { Text(if (isTrash) "Delete", color = MaterialTheme.colorScheme.error) else Text("Move", color = MaterialTheme.colorScheme.error) } },
                         dismissButton = { TextButton(onClick = { viewModel.showDeleteDialog = false }) { Text("Cancel") } }
                     )
                 }
@@ -188,6 +189,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 } else viewModel.showShareDialog = true },
                                 onActionDelete = { viewModel.showDeleteDialog = true },
+                                onActionRestore = { viewModel.restoreFromTrash() },
                                 onActionCancel = { viewModel.clearSelection() }
                             )
                         }

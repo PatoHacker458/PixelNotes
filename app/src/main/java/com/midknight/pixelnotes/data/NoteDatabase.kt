@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 10, exportSchema = false)
+@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 11, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class NoteDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
@@ -26,58 +26,39 @@ abstract class NoteDatabase : RoomDatabase() {
                 database.execSQL("INSERT OR IGNORE INTO `folders` (`path`, `name`, `parentPath`) VALUES ('Personal', 'Personal', NULL)")
             }
         }
-
-        private val MIGRATION_5_6 = object : Migration(5, 6) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("ALTER TABLE `notes` ADD COLUMN `paperStyle` INTEGER NOT NULL DEFAULT 0")
-            }
-        }
-
-        private val MIGRATION_6_7 = object : Migration(6, 7) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("ALTER TABLE `notes` ADD COLUMN `canvasColor` INTEGER NOT NULL DEFAULT -1")
-            }
-        }
-
+        private val MIGRATION_5_6 = object : Migration(5, 6) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `notes` ADD COLUMN `paperStyle` INTEGER NOT NULL DEFAULT 0") } }
+        private val MIGRATION_6_7 = object : Migration(6, 7) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `notes` ADD COLUMN `canvasColor` INTEGER NOT NULL DEFAULT -1") } }
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                // 1. Crear la nueva tabla de páginas
                 database.execSQL("CREATE TABLE IF NOT EXISTS `pages` (`pageId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `noteId` INTEGER NOT NULL, `pageNumber` INTEGER NOT NULL, `drawingData` TEXT NOT NULL, `backgroundUri` TEXT, `paperStyle` INTEGER NOT NULL, `canvasColor` INTEGER NOT NULL)")
-
-                // 2. Extraer los datos visuales antiguos e insertarlos como la Página 0 de cada Nota
                 database.execSQL("INSERT INTO `pages` (`noteId`, `pageNumber`, `drawingData`, `backgroundUri`, `paperStyle`, `canvasColor`) SELECT `id`, 0, `drawingData`, `backgroundUri`, `paperStyle`, `canvasColor` FROM `notes`")
-
-                // 3. Reconstruir la tabla notes eliminando las propiedades visuales
                 database.execSQL("CREATE TABLE IF NOT EXISTS `notes_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `content` TEXT NOT NULL, `date` TEXT NOT NULL, `folder` TEXT NOT NULL)")
                 database.execSQL("INSERT INTO `notes_new` (`id`, `title`, `content`, `date`, `folder`) SELECT `id`, `title`, `content`, `date`, `folder` FROM `notes`")
                 database.execSQL("DROP TABLE `notes`")
                 database.execSQL("ALTER TABLE `notes_new` RENAME TO `notes`")
             }
         }
-
-        private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
-            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
-                // Añadir soporte para textos flotantes a las páginas existentes
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE `pages` ADD COLUMN `textData` TEXT NOT NULL DEFAULT '[]'")
-                // Crear la tabla para el gestor de fuentes instaladas
                 database.execSQL("CREATE TABLE IF NOT EXISTS `custom_fonts` (`name` TEXT NOT NULL, `fileName` TEXT NOT NULL, PRIMARY KEY(`name`))")
             }
         }
-
-        private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
-            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE `pages` ADD COLUMN `imageData` TEXT NOT NULL DEFAULT '[]'")
             }
         }
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `notes` ADD COLUMN `inTrash` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
-        fun getDatabase(context: android.content.Context): NoteDatabase {
+        fun getDatabase(context: Context): NoteDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = androidx.room.Room.databaseBuilder(
-                    context.applicationContext,
-                    NoteDatabase::class.java,
-                    "pixel_notes_database"
-                )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10) // ACTUALIZADO
+                val instance = Room.databaseBuilder(context.applicationContext, NoteDatabase::class.java, "pixel_notes_database")
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

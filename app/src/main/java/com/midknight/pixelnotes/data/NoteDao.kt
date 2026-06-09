@@ -27,8 +27,8 @@ interface NoteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPage(page: PageEntity): Long
 
-    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
-    suspend fun insertPages(pages: List<com.midknight.pixelnotes.data.PageEntity>): List<Long>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPages(pages: List<PageEntity>): List<Long>
 
     @Update
     suspend fun updatePage(page: PageEntity): Int
@@ -54,16 +54,16 @@ interface NoteDao {
     @Query("DELETE FROM folders WHERE path = :path OR path LIKE :path || '/%'")
     suspend fun deleteFolderCascade(path: String): Int
 
-    @Query("DELETE FROM notes WHERE folder = :path OR folder LIKE :path || '/%'")
-    suspend fun deleteNotesInFolderCascade(path: String): Int
+    @Query("UPDATE notes SET inTrash = 1 WHERE folder = :path OR folder LIKE :path || '/%'")
+    suspend fun trashNotesInFolderCascade(path: String): Int
 
     @Delete
     suspend fun deleteFolder(folder: FolderEntity): Int
 
     @Query("SELECT * FROM custom_fonts ORDER BY name ASC")
-    fun getAllCustomFonts(): kotlinx.coroutines.flow.Flow<List<CustomFont>>
+    fun getAllCustomFonts(): Flow<List<CustomFont>>
 
-    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomFont(font: CustomFont): Long
 
     @Delete

@@ -79,21 +79,23 @@ fun NotesScreen(
         )
     }
 
-    val displayedFolders = if (searchQuery.isNotBlank()) {
+    val displayedFolders = if (currentFolder == "Trash") emptyList() else if (searchQuery.isNotBlank()) {
         folders.filter { it.name.contains(searchQuery, true) }
     } else {
-        if (currentFolder == "Todas") folders.filter { it.parentPath == null } else folders.filter { it.parentPath == currentFolder }
+        if (currentFolder == "All Notes") folders.filter { it.parentPath == null } else folders.filter { it.parentPath == currentFolder }
     }
 
-    val displayedNotes = if (searchQuery.isNotBlank()) {
-        notes.filter { noteWP -> noteWP.note.title.contains(searchQuery, true) || noteWP.note.content.contains(searchQuery, true) }
+    val displayedNotes = if (currentFolder == "Trash") {
+        notes.filter { it.note.inTrash }
+    } else if (searchQuery.isNotBlank()) {
+        notes.filter { !it.note.inTrash && (it.note.title.contains(searchQuery, true) || it.note.content.contains(searchQuery, true)) }
     } else {
-        if (currentFolder == "Todas") notes else notes.filter { it.note.folder == currentFolder }
+        if (currentFolder == "All Notes") notes.filter { !it.note.inTrash } else notes.filter { !it.note.inTrash && it.note.folder == currentFolder }
     }
 
     Scaffold(
         floatingActionButton = {
-            if (selectedNotes.isEmpty()) {
+            if (selectedNotes.isEmpty() && currentFolder != "Trash") {
                 FloatingActionButton(onClick = onCreateNewNote, containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
                     Icon(Icons.Default.Add, contentDescription = "New Note")
                 }
@@ -130,7 +132,7 @@ fun NotesScreen(
                         NoteCard(
                             noteWithPages = noteWP,
                             isSelected = selectedNotes.any { it.note.id == noteWP.note.id },
-                            onClick = { if (selectedNotes.isNotEmpty()) onNoteLongClick(noteWP) else onNoteClick(noteWP) },
+                            onClick = { if (selectedNotes.isNotEmpty() || currentFolder == "Trash") onNoteLongClick(noteWP) else onNoteClick(noteWP) },
                             onLongClick = { onNoteLongClick(noteWP) }
                         )
                     }

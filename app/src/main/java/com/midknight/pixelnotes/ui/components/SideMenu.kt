@@ -24,12 +24,15 @@ import androidx.compose.material.icons.filled.AllInbox
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -78,6 +81,7 @@ fun SideMenu(
     onActionExport: () -> Unit,
     onActionShare: () -> Unit,
     onActionDelete: () -> Unit,
+    onActionRestore: () -> Unit,
     onActionCancel: () -> Unit
 ) {
     if (selectedNotesCount > 0) {
@@ -105,17 +109,14 @@ fun SideMenu(
             }
 
             LazyColumn(modifier = Modifier.weight(1f)) {
-                item {
-                    SideMenuItem(text = "Move to...", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionMove, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DriveFileMove)
-                }
-                item {
-                    SideMenuItem(text = "Merge to PDF", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionExport, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.PictureAsPdf)
-                }
-                item {
-                    SideMenuItem(text = "Share", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionShare, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Share)
-                }
-                item {
-                    SideMenuItem(text = "Delete", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionDelete, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Delete)
+                if (currentFolder == "Trash") {
+                    item { SideMenuItem(text = "Restore", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionRestore, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Restore) }
+                    item { SideMenuItem(text = "Delete Permanently", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionDelete, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DeleteForever) }
+                } else {
+                    item { SideMenuItem(text = "Move to...", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionMove, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DriveFileMove) }
+                    item { SideMenuItem(text = "Merge to PDF", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionExport, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.PictureAsPdf) }
+                    item { SideMenuItem(text = "Share", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionShare, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Share) }
+                    item { SideMenuItem(text = "Move to Trash", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionDelete, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Delete) }
                 }
             }
         }
@@ -181,7 +182,7 @@ fun SideMenu(
 
         LazyColumn(modifier = Modifier.weight(1f)) {
             item {
-                SideMenuItem(text = "Todas", isSelected = currentFolder == "Todas", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { onFolderSelected("Todas") }, onAddSubfolder = null, onRename = {}, onDelete = {})
+                SideMenuItem(text = "All Notes", isSelected = currentFolder == "All Notes", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { onFolderSelected("All Notes") }, onAddSubfolder = null, onRename = {}, onDelete = {})
             }
             items(tree) { node ->
                 FolderTreeNode(
@@ -190,6 +191,9 @@ fun SideMenu(
                     onRename = { path, name -> folderToRenamePath = path; folderRenameValue = name; showRenameDialog = true },
                     onDelete = onDeleteFolder
                 )
+            }
+            item {
+                SideMenuItem(text = "Trash", isSelected = currentFolder == "Trash", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { onFolderSelected("Trash") }, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DeleteSweep)
             }
         }
 
@@ -232,12 +236,12 @@ private fun SideMenuItem(
             if (hasChildren) {
                 Icon(if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight, contentDescription = null, tint = contentColor, modifier = Modifier.size(24.dp).clickable { onToggleExpand() })
             } else {
-                val icon = iconOverride ?: if (text == "Todas") Icons.Default.AllInbox else Icons.Default.Folder
+                val icon = iconOverride ?: if (text == "All Notes") Icons.Default.AllInbox else Icons.Default.Folder
                 Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(24.dp))
             }
             Spacer(modifier = Modifier.width(12.dp))
             Text(text, color = contentColor, style = MaterialTheme.typography.bodyLarge, fontWeight = if(isSelected) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f))
-            if (onAddSubfolder != null && text != "Todas") {
+            if (onAddSubfolder != null && text != "All Notes") {
                 IconButton(onClick = onAddSubfolder, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Add, contentDescription = "Add Subfolder", tint = contentColor, modifier = Modifier.size(16.dp)) }
             }
         }
