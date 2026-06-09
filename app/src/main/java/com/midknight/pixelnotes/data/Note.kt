@@ -16,7 +16,8 @@ data class Note(
     val content: String,
     val date: String,
     val folder: String = "General",
-    val inTrash: Boolean = false
+    val inTrash: Boolean = false,
+    val isInfinite: Boolean = false
 )
 
 @Entity(tableName = "pages")

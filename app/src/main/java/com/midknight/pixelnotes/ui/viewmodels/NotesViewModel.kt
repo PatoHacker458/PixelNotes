@@ -39,6 +39,8 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var currentFolderFilter by mutableStateOf("All Notes")
     var currentScreen by mutableIntStateOf(0)
     var selectedNoteWithPages by mutableStateOf<NoteWithPages?>(null)
+    var isCurrentNoteInfinite by mutableStateOf(false)
+    var cameraResetTrigger by mutableIntStateOf(0)
 
     var currentTitle by mutableStateOf("New Note")
     var currentColor by mutableStateOf(Color.Black)
@@ -189,8 +191,10 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
     fun isNoteBlank(): Boolean { if (currentTitle != "New Note" || currentPages.size > 1) return false; val p = currentPages.firstOrNull() ?: return true; return p.drawingData.isEmpty() && p.textData.isEmpty() && p.imageData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1 }
 
-    fun openNoteForEditing(noteWP: NoteWithPages?) {
+    fun openNoteForEditing(noteWP: NoteWithPages?, isInfinite: Boolean = false) {
         selectedNoteWithPages = noteWP; undoStack.clear(); redoStack.clear(); currentColor = Color.Black; currentStrokeWidth = 8f; currentEraserWidth = 20f; currentTextSize = 40f; currentFontName = "Default"; setTool(DrawingTool.PEN); currentPages.clear()
+        isCurrentNoteInfinite = noteWP?.note?.isInfinite ?: isInfinite
+        cameraResetTrigger++
         if (noteWP != null && noteWP.pages.isNotEmpty()) { currentTitle = noteWP.note.title; currentPages.addAll(noteWP.pages); activePageIndex = 0 } else { currentTitle = "New Note"; currentPages.add(PageEntity(noteId = 0, pageNumber = 0)); activePageIndex = 0 }
         currentScreen = 1
     }
@@ -205,11 +209,18 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun saveCurrentNote(date: String) {
         commitSelection()
         val targetFolder = selectedNoteWithPages?.note?.folder ?: if (currentFolderFilter == "All Notes" || currentFolderFilter == "Trash") "General" else currentFolderFilter
-        val noteToSave = selectedNoteWithPages?.note?.copy(title = currentTitle, date = date, folder = targetFolder) ?: Note(title = currentTitle, content = "", date = date, folder = targetFolder)
+        val noteToSave = selectedNoteWithPages?.note?.copy(title = currentTitle, date = date, folder = targetFolder, isInfinite = isCurrentNoteInfinite) ?: Note(title = currentTitle, content = "", date = date, folder = targetFolder, isInfinite = isCurrentNoteInfinite)
         val pagesSnapshot = currentPages.toList()
 
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val noteId = if (noteToSave.id == 0) dao.insertNote(noteToSave).toInt() else { dao.updateNote(noteToSave); noteToSave.id }
+            val noteId = if (noteToSave.id == 0) {
+                val newId = dao.insertNote(noteToSave).toInt()
+                selectedNoteWithPages = NoteWithPages(noteToSave.copy(id = newId), pagesSnapshot)
+                newId
+            } else {
+                dao.updateNote(noteToSave)
+                noteToSave.id
+            }
             dao.deletePagesByNoteId(noteId)
             val pagesToInsert = pagesSnapshot.mapIndexed { index, page -> page.copy(pageId = 0, noteId = noteId, pageNumber = index) }
             pagesToInsert.chunked(100).forEach { chunk -> dao.insertPages(chunk) }

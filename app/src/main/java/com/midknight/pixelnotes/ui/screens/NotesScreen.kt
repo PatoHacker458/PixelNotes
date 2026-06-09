@@ -1,5 +1,6 @@
 package com.midknight.pixelnotes.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,10 +14,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AllOut
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,7 +54,7 @@ fun NotesScreen(
     selectedNotes: List<NoteWithPages>,
     onNoteClick: (NoteWithPages) -> Unit,
     onNoteLongClick: (NoteWithPages) -> Unit,
-    onCreateNewNote: () -> Unit,
+    onCreateNewNote: (Boolean) -> Unit,
     onFolderSelected: (String) -> Unit,
     onRenameFolder: (String, String) -> Unit,
     onDeleteFolder: (String) -> Unit
@@ -58,6 +63,7 @@ fun NotesScreen(
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
     var newFolderName by remember { mutableStateOf("") }
+    var showFabMenu by remember { mutableStateOf(false) }
 
     if (folderToDelete != null) {
         AlertDialog(
@@ -96,8 +102,32 @@ fun NotesScreen(
     Scaffold(
         floatingActionButton = {
             if (selectedNotes.isEmpty() && currentFolder != "Trash") {
-                FloatingActionButton(onClick = onCreateNewNote, containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
-                    Icon(Icons.Default.Add, contentDescription = "New Note")
+                Column(horizontalAlignment = Alignment.End) {
+                    AnimatedVisibility(visible = showFabMenu) {
+                        Column(modifier = Modifier.padding(bottom = 16.dp), horizontalAlignment = Alignment.End) {
+                            ExtendedFloatingActionButton(
+                                text = { Text("A4 Note") },
+                                icon = { Icon(Icons.Default.Description, contentDescription = null) },
+                                onClick = { showFabMenu = false; onCreateNewNote(false) },
+                                modifier = Modifier.padding(bottom = 8.dp),
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            )
+                            ExtendedFloatingActionButton(
+                                text = { Text("Infinite Canvas") },
+                                icon = { Icon(Icons.Default.AllOut, contentDescription = null) },
+                                onClick = { showFabMenu = false; onCreateNewNote(true) },
+                                modifier = Modifier.padding(bottom = 8.dp),
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            )
+                        }
+                    }
+                    FloatingActionButton(
+                        onClick = { showFabMenu = !showFabMenu },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ) {
+                        Icon(if (showFabMenu) Icons.Default.Close else Icons.Default.Add, contentDescription = "New Note")
+                    }
                 }
             }
         }

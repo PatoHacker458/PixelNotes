@@ -66,7 +66,6 @@ import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ViewHeadline
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.AlertDialog
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -89,6 +88,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -106,6 +106,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -189,16 +190,14 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     val colors = listOf(Color.Black, Color.White, Color.Red, Color.Blue, Color.Green, Color(0xFFFBC02D), Color(0xFFE91E63))
     val canvasColors = listOf(-1, Color.Black.toArgb(), Color.DarkGray.toArgb(), Color(0xFFFFF8E7).toArgb(), Color(0xFFE3F2FD).toArgb())
 
-    // --- LAUNCHERS PARA MENÚ EXPORT ---
     val pdfLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        uri?.let { coroutineScope.launch { val exporter = PdfExporter(context); val noteToExport = viewModel.selectedNoteWithPages?.copy(note = viewModel.selectedNoteWithPages!!.note.copy(title = viewModel.currentTitle), pages = viewModel.currentPages.toList()) ?: NoteWithPages(note = Note(title = viewModel.currentTitle, content = "", date = "", folder = "General"), pages = viewModel.currentPages.toList()); exporter.exportToPdf(listOf(noteToExport), it); Toast.makeText(context, "Exported full Note to PDF", Toast.LENGTH_SHORT).show() } }
+        uri?.let { coroutineScope.launch { val exporter = PdfExporter(context); val noteToExport = viewModel.selectedNoteWithPages?.copy(note = viewModel.selectedNoteWithPages!!.note.copy(title = viewModel.currentTitle), pages = viewModel.currentPages.toList()) ?: NoteWithPages(note = Note(title = viewModel.currentTitle, content = "", date = "", folder = "General", isInfinite = viewModel.isCurrentNoteInfinite), pages = viewModel.currentPages.toList()); exporter.exportToPdf(listOf(noteToExport), it); Toast.makeText(context, "Exported full Note to PDF", Toast.LENGTH_SHORT).show() } }
     }
     var singlePageToExport by remember { mutableStateOf<PageEntity?>(null) }
     val singlePdfLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
-        uri?.let { safeUri -> singlePageToExport?.let { page -> coroutineScope.launch { val exporter = PdfExporter(context); exporter.exportSinglePageToPdf(page, safeUri); Toast.makeText(context, "Exported single page to PDF", Toast.LENGTH_SHORT).show(); singlePageToExport = null } } }
+        uri?.let { safeUri -> singlePageToExport?.let { page -> coroutineScope.launch { val exporter = PdfExporter(context); exporter.exportSinglePageToPdf(page, safeUri, viewModel.isCurrentNoteInfinite); Toast.makeText(context, "Exported single page to PDF", Toast.LENGTH_SHORT).show(); singlePageToExport = null } } }
     }
 
-    // --- LAUNCHERS PARA MENÚ (+) AÑADIR ---
     val pdfImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri -> uri?.let { viewModel.importPdfDocument(context, it) } }
 
     val floatingImagePickerLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -209,14 +208,9 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.TakePicture()) { success ->
-        if (success) {
-            viewModel.pendingCameraUri?.let { uri ->
-                viewModel.addFloatingImageToPage(viewModel.activePageIndex, uri.toString())
-            }
-        }
+        if (success) { viewModel.pendingCameraUri?.let { uri -> viewModel.addFloatingImageToPage(viewModel.activePageIndex, uri.toString()) } }
     }
 
-    // --- LAUNCHER PARA FONDO DE LIENZO ---
     val backgroundPickerLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let {
             context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -245,68 +239,136 @@ fun DrawingScreen(viewModel: NotesViewModel) {
 
     Scaffold(containerColor = MaterialTheme.colorScheme.surfaceVariant) { paddingValues ->
         BoxWithConstraints(modifier = Modifier.padding(paddingValues).fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
-            val maxWidthPx = constraints.maxWidth.toFloat(); val maxHeightPx = constraints.maxHeight.toFloat()
-            var scale by remember { mutableFloatStateOf(1f) }; var offset by remember { mutableStateOf(Offset.Zero) }; var gestureIntent by remember { mutableStateOf("none") }
-            val transformState = rememberTransformableState { zoomChange, offsetChange, _ -> if (gestureIntent == "none") { val zoomDelta = abs(zoomChange - 1f) * 300f; val panDelta = offsetChange.getDistance(); if (panDelta > 3f && panDelta > zoomDelta) gestureIntent = "pan" else if (zoomDelta > 3f) gestureIntent = "zoom" }; if (gestureIntent != "pan") scale = (scale * zoomChange).coerceIn(1f, 5f); val maxX = (maxWidthPx * (scale - 1f)) / 2f; val maxY = (maxHeightPx * (scale - 1f)) / 2f; val newOffsetY = offset.y + (offsetChange.y * 2.0f); var overflowY = 0f; if (newOffsetY > maxY) overflowY = newOffsetY - maxY else if (newOffsetY < -maxY) overflowY = newOffsetY + maxY; if (overflowY != 0f) listState.dispatchRawDelta(-overflowY); offset = Offset((offset.x + (offsetChange.x * 2.0f)).coerceIn(-maxX, maxX), newOffsetY.coerceIn(-maxY, maxY)) }
-            LaunchedEffect(transformState.isTransformInProgress) { if (!transformState.isTransformInProgress) gestureIntent = "none" }
+            val maxWidthPx = constraints.maxWidth.toFloat()
+            val maxHeightPx = constraints.maxHeight.toFloat()
+            var scale by remember { mutableFloatStateOf(1f) }
+            var offset by remember { mutableStateOf(Offset.Zero) }
 
-            Box(modifier = Modifier.fillMaxSize().transformable(state = transformState), contentAlignment = Alignment.Center) {
-                LazyColumn(state = listState, userScrollEnabled = scale == 1f, modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y), horizontalAlignment = Alignment.CenterHorizontally, contentPadding = PaddingValues(vertical = 32.dp), verticalArrangement = Arrangement.spacedBy(32.dp)) {
-                    items(viewModel.currentPages.size) { index ->
-                        val page = viewModel.currentPages[index]
-                        Box(modifier = Modifier.fillParentMaxHeight(0.95f).aspectRatio(1f / 1.414f).shadow(8.dp).background(if (page.canvasColor == -1) Color.White else Color(page.canvasColor))) {
-                            PaperTemplate(style = page.paperStyle, modifier = Modifier.fillMaxSize())
+            val transformState = rememberTransformableState { zoomChange, offsetChange, _ ->
+                scale = (scale * zoomChange).coerceIn(1f, 15f)
+                val maxX = (maxWidthPx * (scale - 1f)) / 2f
+                val maxY = (maxHeightPx * (scale - 1f)) / 2f
 
-                            page.backgroundUri?.let { uriStr ->
-                                if (uriStr.contains("?pdfPage=")) { val parts = uriStr.split("?pdfPage="); PdfPageBackground(pdfPath = parts[0], pageIndex = parts[1].toInt()) }
-                                else { AsyncImage(model = uriStr, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                            }
+                val newOffsetY = offset.y + offsetChange.y
+                var overflowY = 0f
+                if (newOffsetY > maxY) overflowY = newOffsetY - maxY
+                else if (newOffsetY < -maxY) overflowY = newOffsetY + maxY
 
-                            DrawingCanvas(
-                                pageIndex = index,
-                                strokes = page.drawingData,
-                                selectedStrokes = if (viewModel.selectionPageIndex == index) viewModel.selectedStrokes else emptyList(),
-                                texts = page.textData,
-                                selectedTexts = if (viewModel.selectionPageIndex == index) viewModel.selectedTexts else emptyList(),
-                                images = page.imageData, // ¡AQUÍ PASAMOS LAS IMÁGENES AL LIENZO!
-                                selectedImages = if (viewModel.selectionPageIndex == index) viewModel.selectedImages else emptyList(), // ¡AQUÍ PASAMOS LA SELECCIÓN!
-                                customFonts = customFonts,
-                                isSelectionActiveOnPage = viewModel.selectionPageIndex == index,
-                                selectionMode = viewModel.selectionMode,
-                                currentColor = viewModel.currentColor,
-                                currentStrokeWidth = if (viewModel.currentTool == DrawingTool.ERASER) viewModel.currentEraserWidth else viewModel.currentStrokeWidth,
-                                currentTool = viewModel.currentTool,
-                                eraserType = viewModel.eraserType,
-                                fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
-                                onStrokeAdd = { viewModel.addStrokeToPage(index, it) },
-                                onStrokeRemove = { viewModel.removeStrokeFromPage(index, it) },
-                                onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = index; currentTextInput = ""; isTextEditing = true },
-                                onProcessSelection = { viewModel.processSelection(index, it) },
-                                onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
-                                onScaleSelection = { scale, px, py -> viewModel.scaleSelection(scale, px, py) },
-                                onCommitSelection = { viewModel.commitSelection() },
-                                modifier = Modifier.fillMaxSize()
-                            )                        }
-                    }
+                if (overflowY != 0f) {
+                    coroutineScope.launch { listState.dispatchRawDelta(-overflowY) }
                 }
+
+                offset = Offset(
+                    (offset.x + offsetChange.x).coerceIn(if (maxX > 0) -maxX else 0f, if (maxX > 0) maxX else 0f),
+                    newOffsetY.coerceIn(if (maxY > 0) -maxY else 0f, if (maxY > 0) maxY else 0f)
+                )
             }
 
-            androidx.compose.animation.AnimatedVisibility(visible = showPagesPanel, enter = slideInHorizontally(initialOffsetX = { -it }), exit = slideOutHorizontally(targetOffsetX = { -it }), modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp, top = 80.dp, bottom = 80.dp).zIndex(10f)) {
-                Column(modifier = Modifier.width(90.dp).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)).pointerInput(Unit){}.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(24.dp)).padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    var draggedItem by remember { mutableStateOf<Int?>(null) }; var dragOffset by remember { mutableFloatStateOf(0f) }
-                    LazyColumn(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (viewModel.isCurrentNoteInfinite) {
+                val page = viewModel.currentPages.firstOrNull()
+                if (page != null) {
+                    Box(modifier = Modifier.fillMaxSize().background(if (page.canvasColor == -1) Color(0xFFF5F5F5) else Color(page.canvasColor)).clipToBounds()) {
+                        DrawingCanvas(
+                            pageIndex = 0,
+                            isInfiniteCanvas = true,
+                            cameraResetTrigger = viewModel.cameraResetTrigger,
+                            strokes = page.drawingData,
+                            selectedStrokes = if (viewModel.selectionPageIndex == 0) viewModel.selectedStrokes else emptyList(),
+                            texts = page.textData,
+                            selectedTexts = if (viewModel.selectionPageIndex == 0) viewModel.selectedTexts else emptyList(),
+                            images = page.imageData,
+                            selectedImages = if (viewModel.selectionPageIndex == 0) viewModel.selectedImages else emptyList(),
+                            customFonts = customFonts,
+                            isSelectionActiveOnPage = viewModel.selectionPageIndex == 0,
+                            selectionMode = viewModel.selectionMode,
+                            currentColor = viewModel.currentColor,
+                            currentStrokeWidth = if (viewModel.currentTool == DrawingTool.ERASER) viewModel.currentEraserWidth else viewModel.currentStrokeWidth,
+                            currentTool = viewModel.currentTool,
+                            eraserType = viewModel.eraserType,
+                            fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
+                            onStrokeAdd = { viewModel.addStrokeToPage(0, it) },
+                            onStrokeRemove = { viewModel.removeStrokeFromPage(0, it) },
+                            onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = 0; currentTextInput = ""; isTextEditing = true },
+                            onProcessSelection = { viewModel.processSelection(0, it) },
+                            onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
+                            onScaleSelection = { s, px, py -> viewModel.scaleSelection(s, px, py) },
+                            onCommitSelection = { viewModel.commitSelection() },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            } else {
+                val density = LocalDensity.current
+                val baseHeightDp = with(density) { (maxHeightPx * 0.95f).toDp() }
+
+                Box(modifier = Modifier.fillMaxSize().transformable(state = transformState), contentAlignment = Alignment.Center) {
+                    LazyColumn(
+                        state = listState,
+                        userScrollEnabled = scale == 1f,
+                        modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        contentPadding = PaddingValues(vertical = 32.dp),
+                        verticalArrangement = Arrangement.spacedBy(32.dp)
+                    ) {
                         items(viewModel.currentPages.size) { index ->
-                            val isSelected = index == viewModel.activePageIndex; val yOffset = if (draggedItem == index) dragOffset else 0f; var showPageMenu by remember { mutableStateOf(false) }
-                            Box(modifier = Modifier.padding(vertical = 8.dp).zIndex(if (draggedItem == index) 1f else 0f).graphicsLayer(translationY = yOffset).pointerInput(Unit) { detectDragGesturesAfterLongPress(onDragStart = { draggedItem = index; dragOffset = 0f }, onDragEnd = { val targetIndex = (index + (dragOffset / 200f).toInt()).coerceIn(0, viewModel.currentPages.size - 1); viewModel.movePage(index, targetIndex); draggedItem = null; dragOffset = 0f }, onDrag = { _, dragAmount -> dragOffset += dragAmount.y }) }) {
-                                Box(modifier = Modifier.size(width = 60.dp, height = 80.dp).clip(RoundedCornerShape(8.dp)).background(if (viewModel.currentPages[index].canvasColor == -1) Color.White else Color(viewModel.currentPages[index].canvasColor)).border(width = if (isSelected) 3.dp else 1.dp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, shape = RoundedCornerShape(8.dp)).clickable { coroutineScope.launch { listState.animateScrollToItem(index) } }, contentAlignment = Alignment.Center) { PaperTemplate(style = viewModel.currentPages[index].paperStyle, modifier = Modifier.fillMaxSize()); Text("${index + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }
-                                Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
-                                    IconButton(onClick = { showPageMenu = true }, modifier = Modifier.size(24.dp).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f), CircleShape)) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu", modifier = Modifier.size(16.dp)) }
-                                    DropdownMenu(expanded = showPageMenu, onDismissRequest = { showPageMenu = false }) { DropdownMenuItem(text = { Text("Export as PDF") }, onClick = { showPageMenu = false; singlePageToExport = viewModel.currentPages[index]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${index + 1}.pdf") }); if (viewModel.currentPages.size > 1) { DropdownMenuItem(text = { Text("Delete Page", color = MaterialTheme.colorScheme.error) }, onClick = { showPageMenu = false; viewModel.deletePageAt(index) }) } }
+                            val page = viewModel.currentPages[index]
+                            Box(modifier = Modifier.height(baseHeightDp).aspectRatio(1f / 1.414f).shadow(8.dp).background(if (page.canvasColor == -1) Color.White else Color(page.canvasColor))) {
+                                PaperTemplate(style = page.paperStyle, modifier = Modifier.fillMaxSize())
+
+                                page.backgroundUri?.let { uriStr ->
+                                    if (uriStr.contains("?pdfPage=")) { val parts = uriStr.split("?pdfPage="); PdfPageBackground(pdfPath = parts[0], pageIndex = parts[1].toInt()) }
+                                    else { AsyncImage(model = uriStr, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
                                 }
+
+                                DrawingCanvas(
+                                    pageIndex = index,
+                                    isInfiniteCanvas = false,
+                                    cameraResetTrigger = viewModel.cameraResetTrigger,
+                                    strokes = page.drawingData,
+                                    selectedStrokes = if (viewModel.selectionPageIndex == index) viewModel.selectedStrokes else emptyList(),
+                                    texts = page.textData,
+                                    selectedTexts = if (viewModel.selectionPageIndex == index) viewModel.selectedTexts else emptyList(),
+                                    images = page.imageData,
+                                    selectedImages = if (viewModel.selectionPageIndex == index) viewModel.selectedImages else emptyList(),
+                                    customFonts = customFonts,
+                                    isSelectionActiveOnPage = viewModel.selectionPageIndex == index,
+                                    selectionMode = viewModel.selectionMode,
+                                    currentColor = viewModel.currentColor,
+                                    currentStrokeWidth = if (viewModel.currentTool == DrawingTool.ERASER) viewModel.currentEraserWidth else viewModel.currentStrokeWidth,
+                                    currentTool = viewModel.currentTool,
+                                    eraserType = viewModel.eraserType,
+                                    fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
+                                    onStrokeAdd = { viewModel.addStrokeToPage(index, it) },
+                                    onStrokeRemove = { viewModel.removeStrokeFromPage(index, it) },
+                                    onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = index; currentTextInput = ""; isTextEditing = true },
+                                    onProcessSelection = { viewModel.processSelection(index, it) },
+                                    onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
+                                    onScaleSelection = { s, px, py -> viewModel.scaleSelection(s, px, py) },
+                                    onCommitSelection = { viewModel.commitSelection() },
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                         }
                     }
-                    IconButton(onClick = { viewModel.addNewPage(); coroutineScope.launch { listState.animateScrollToItem(viewModel.currentPages.lastIndex) } }, modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)) { Icon(Icons.Filled.Add, contentDescription = "Add Page", tint = MaterialTheme.colorScheme.onPrimary) }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(visible = showPagesPanel, enter = slideInHorizontally(initialOffsetX = { -it }), exit = slideOutHorizontally(targetOffsetX = { -it }), modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp, top = 80.dp, bottom = 80.dp).zIndex(10f)) {
+                    Column(modifier = Modifier.width(90.dp).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)).pointerInput(Unit){}.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(24.dp)).padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        var draggedItem by remember { mutableStateOf<Int?>(null) }; var dragOffset by remember { mutableFloatStateOf(0f) }
+                        LazyColumn(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            items(viewModel.currentPages.size) { index ->
+                                val isSelected = index == viewModel.activePageIndex; val yOffset = if (draggedItem == index) dragOffset else 0f; var showPageMenu by remember { mutableStateOf(false) }
+                                Box(modifier = Modifier.padding(vertical = 8.dp).zIndex(if (draggedItem == index) 1f else 0f).graphicsLayer(translationY = yOffset).pointerInput(Unit) { detectDragGesturesAfterLongPress(onDragStart = { draggedItem = index; dragOffset = 0f }, onDragEnd = { val targetIndex = (index + (dragOffset / 200f).toInt()).coerceIn(0, viewModel.currentPages.size - 1); viewModel.movePage(index, targetIndex); draggedItem = null; dragOffset = 0f }, onDrag = { _, dragAmount -> dragOffset += dragAmount.y }) }) {
+                                    Box(modifier = Modifier.size(width = 60.dp, height = 80.dp).clip(RoundedCornerShape(8.dp)).background(if (viewModel.currentPages[index].canvasColor == -1) Color.White else Color(viewModel.currentPages[index].canvasColor)).border(width = if (isSelected) 3.dp else 1.dp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, shape = RoundedCornerShape(8.dp)).clickable { coroutineScope.launch { listState.animateScrollToItem(index) } }, contentAlignment = Alignment.Center) { PaperTemplate(style = viewModel.currentPages[index].paperStyle, modifier = Modifier.fillMaxSize()); Text("${index + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }
+                                    Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
+                                        IconButton(onClick = { showPageMenu = true }, modifier = Modifier.size(24.dp).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f), CircleShape)) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu", modifier = Modifier.size(16.dp)) }
+                                        DropdownMenu(expanded = showPageMenu, onDismissRequest = { showPageMenu = false }) { DropdownMenuItem(text = { Text("Export as PDF") }, onClick = { showPageMenu = false; singlePageToExport = viewModel.currentPages[index]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${index + 1}.pdf") }); if (viewModel.currentPages.size > 1) { DropdownMenuItem(text = { Text("Delete Page", color = MaterialTheme.colorScheme.error) }, onClick = { showPageMenu = false; viewModel.deletePageAt(index) }) } }
+                                    }
+                                }
+                            }
+                        }
+                        IconButton(onClick = { viewModel.addNewPage(); coroutineScope.launch { listState.animateScrollToItem(viewModel.currentPages.lastIndex) } }, modifier = Modifier.background(MaterialTheme.colorScheme.primary, CircleShape)) { Icon(Icons.Filled.Add, contentDescription = "Add Page", tint = MaterialTheme.colorScheme.onPrimary) }
+                    }
                 }
             }
 
@@ -318,13 +380,14 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 }
 
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { showPagesPanel = !showPagesPanel }) { Icon(Icons.Filled.Layers, contentDescription = "Pages", tint = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
-                    Spacer(modifier = Modifier.width(4.dp))
+                    if (!viewModel.isCurrentNoteInfinite) {
+                        IconButton(onClick = { showPagesPanel = !showPagesPanel }) { Icon(Icons.Filled.Layers, contentDescription = "Pages", tint = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
                     IconButton(onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled }) { Icon(if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool, contentDescription = null, tint = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
 
-                    // --- 1. MENÚ DE PAPEL EXPRESSIVE ---
                     Box {
                         IconButton(onClick = { showPaperMenu = true }) { Icon(Icons.Filled.GridOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                         DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
@@ -335,7 +398,6 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         }
                     }
 
-                    // --- 2. MENÚ DE LIENZO Y FONDO EXPRESSIVE ---
                     Box {
                         IconButton(onClick = { showCanvasColorMenu = true }) { Icon(Icons.Filled.FormatColorFill, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                         DropdownMenu(expanded = showCanvasColorMenu, onDismissRequest = { showCanvasColorMenu = false }) {
@@ -346,7 +408,6 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         }
                     }
 
-                    // --- 3. MENÚ (+) EXPRESSIVE PARA AÑADIR FLOTANTES ---
                     Box {
                         IconButton(onClick = { showAddMenu = true }) { Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                         DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
@@ -359,25 +420,23 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     IconButton(onClick = { viewModel.undo() }) { Icon(Icons.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                     IconButton(onClick = { viewModel.redo() }) { Icon(Icons.Filled.Redo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
 
-                    // --- 4. MENÚ EXPORT EXPRESSIVE ---
                     Box {
                         IconButton(onClick = { showExportMenu = true }) { Icon(Icons.Filled.IosShare, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
                         DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
                             DropdownMenuItem(text = { Text("Export Note as PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
-                            DropdownMenuItem(text = { Text("Export Current Page", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.InsertPageBreak, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; singlePageToExport = viewModel.currentPages[viewModel.activePageIndex]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${viewModel.activePageIndex + 1}.pdf") })
+                            if (!viewModel.isCurrentNoteInfinite) { DropdownMenuItem(text = { Text("Export Current Page", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.InsertPageBreak, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; singlePageToExport = viewModel.currentPages[viewModel.activePageIndex]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${viewModel.activePageIndex + 1}.pdf") }) }
                         }
                     }
                 }
             }
 
-            // BOTTOM TOOLBAR IDÉNTICA...
             Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
                     Row(modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).pointerInput(Unit){}.padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) { colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }; Spacer(modifier = Modifier.width(8.dp)); Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(100.dp)); IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
                         else if (viewModel.currentTool == DrawingTool.ERASER) { Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }; Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }; if (viewModel.eraserType == 0) { Spacer(modifier = Modifier.width(8.dp)); Text("${(viewModel.currentEraserWidth / 100f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Slider(value = viewModel.currentEraserWidth, onValueChange = { viewModel.currentEraserWidth = it }, valueRange = 10f..100f, modifier = Modifier.width(100.dp)) }; IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
                         else if (viewModel.currentTool == DrawingTool.SELECTION) { if (viewModel.selectedStrokes.isNotEmpty() || viewModel.selectedTexts.isNotEmpty()) { colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = 1.dp, color = Color.Transparent, shape = CircleShape).clickable { viewModel.changeSelectionColor(color.toArgb()) }) }; Spacer(modifier = Modifier.width(8.dp)); IconButton(onClick = { viewModel.deleteSelection() }) { Icon(Icons.Filled.DeleteSweep, contentDescription = "Delete Selection", tint = MaterialTheme.colorScheme.error) } } else { Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Free Form", color = if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }; Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Rectangle", color = if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) } }; IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
-                        else if (viewModel.currentTool == DrawingTool.TEXT) { var fontMenuExpanded by remember { mutableStateOf(false) }; Box { Text(text = viewModel.currentFontName, modifier = Modifier.clickable { fontMenuExpanded = true }.padding(8.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); DropdownMenu(expanded = fontMenuExpanded, onDismissRequest = { fontMenuExpanded = false }) { DropdownMenuItem(text = { Text("Default") }, onClick = { viewModel.currentFontName = "Default"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Serif") }, onClick = { viewModel.currentFontName = "Serif"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Monospace") }, onClick = { viewModel.currentFontName = "Monospace"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Cursive") }, onClick = { viewModel.currentFontName = "Cursive"; fontMenuExpanded = false }); customFonts.forEach { font -> DropdownMenuItem(text = { Text(font.name) }, onClick = { viewModel.currentFontName = font.name; fontMenuExpanded = false }) }; DropdownMenuItem(text = { Text("+ Manage Fonts", color = MaterialTheme.colorScheme.primary) }, onClick = { fontMenuExpanded = false; viewModel.closeEditing(); viewModel.currentScreen = 2 }) } }; Spacer(modifier = Modifier.width(8.dp)); colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }; Spacer(modifier = Modifier.width(8.dp)); Text("${viewModel.currentTextSize.toInt()}px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Slider(value = viewModel.currentTextSize, onValueChange = { viewModel.currentTextSize = it }, valueRange = 20f..150f, modifier = Modifier.width(100.dp)); IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
+                        else if (viewModel.currentTool == DrawingTool.TEXT) { var fontMenuExpanded by remember { mutableStateOf(false) }; Box { Text(text = viewModel.currentFontName, modifier = Modifier.clickable { fontMenuExpanded = true }.padding(8.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); DropdownMenu(expanded = fontMenuExpanded, onDismissRequest = { fontMenuExpanded = false }) { DropdownMenuItem(text = { Text("Default") }, onClick = { viewModel.currentFontName = "Default"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Serif") }, onClick = { viewModel.currentFontName = "Serif"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Monospace") }, onClick = { viewModel.currentFontName = "Monospace"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Cursive") }, onClick = { viewModel.currentFontName = "Cursive"; fontMenuExpanded = false }); customFonts.forEach { font -> DropdownMenuItem(text = { Text(font.name) }, onClick = { viewModel.currentFontName = font.name; fontMenuExpanded = false }) }; DropdownMenuItem(text = { Text("+ Manage Fonts", color = MaterialTheme.colorScheme.primary) }, onClick = { fontMenuExpanded = false; viewModel.closeEditing(); viewModel.currentScreen = 2 }) } }; Spacer(modifier = Modifier.width(8.dp)); colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }; Spacer(modifier = Modifier.width(8.dp)); Text("${viewModel.currentTextSize.toInt()}px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Slider(value = viewModel.currentTextSize, onValueChange = { viewModel.currentTextSize = it }, valueRange = 10f..150f, modifier = Modifier.width(100.dp)); IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
                     }
                 }
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -385,7 +444,12 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     tools.forEach { (tool, icon) -> val isSelected = viewModel.currentTool == tool; Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).clickable { if (isSelected) showToolOptions = !showToolOptions else { viewModel.setTool(tool); showToolOptions = true } }, contentAlignment = Alignment.Center) { Icon(icon, contentDescription = null, tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface) } }
                 }
             }
-            androidx.compose.animation.AnimatedVisibility(visible = scale != 1f || offset != Offset.Zero, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) { FloatingActionButton(onClick = { scale = 1f; offset = Offset.Zero }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) { Icon(Icons.Default.FilterCenterFocus, contentDescription = "Reset View") } }
+
+            if (viewModel.isCurrentNoteInfinite) {
+                AnimatedVisibility(visible = true, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) { FloatingActionButton(onClick = { viewModel.cameraResetTrigger++ }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) { Icon(Icons.Default.FilterCenterFocus, contentDescription = "Reset View") } }
+            } else {
+                AnimatedVisibility(visible = scale != 1f || offset != Offset.Zero, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) { FloatingActionButton(onClick = { scale = 1f; offset = Offset.Zero }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) { Icon(Icons.Default.FilterCenterFocus, contentDescription = "Reset View") } }
+            }
         }
     }
 }
