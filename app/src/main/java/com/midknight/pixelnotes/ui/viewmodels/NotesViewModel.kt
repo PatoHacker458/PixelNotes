@@ -29,7 +29,8 @@ import java.util.Locale
 
 enum class DrawingTool { PEN, HIGHLIGHTER, ERASER, TEXT, SELECTION }
 
-data class EditorAction(val pageIndex: Int, val stroke: StrokeData?, val text: TextData?, val isAdd: Boolean)
+// Añadimos el soporte para Imágenes en el Historial (Undo/Redo)
+data class EditorAction(val pageIndex: Int, val stroke: StrokeData?, val text: TextData?, val image: com.midknight.pixelnotes.domain.ImageData?, val isAdd: Boolean)
 
 class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     val notes = dao.getAllNotesWithPages().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -68,27 +69,113 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     var showMoveDialog by mutableStateOf(false)
     var showShareDialog by mutableStateOf(false)
 
-    // PDF Import State
     var isImportingPdf by mutableStateOf(false)
 
+    // --- CÁMARA Y MOTOR DE IMÁGENES FLOTANTES ---
+    var pendingCameraUri by mutableStateOf<android.net.Uri?>(null)
+
+    fun createImageUri(context: android.content.Context): android.net.Uri? {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "pixel_note_${System.currentTimeMillis()}.jpg")
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+        }
+        return context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+    }
+
+    fun addFloatingImageToPage(pageIndex: Int, uri: String) {
+        commitSelection()
+        val page = currentPages[pageIndex]
+        val newImage = com.midknight.pixelnotes.domain.ImageData(
+            x = 100f, y = 100f, width = 600f, height = 600f, uri = uri
+        )
+        currentPages[pageIndex] = page.copy(imageData = page.imageData + newImage)
+        undoStack.add(EditorAction(pageIndex, null, null, newImage, true))
+        redoStack.clear()
+        activePageIndex = pageIndex
+    }
+
     // --- TEXT & SELECTION ENGINE ---
-    fun addTextToPage(pageIndex: Int, text: TextData) { commitSelection(); val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(textData = page.textData + text); undoStack.add(EditorAction(pageIndex, null, text, true)); redoStack.clear(); activePageIndex = pageIndex }
+    val selectedImages = mutableStateListOf<com.midknight.pixelnotes.domain.ImageData>() // NUEVO
+
+    fun addTextToPage(pageIndex: Int, text: TextData) { commitSelection(); val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(textData = page.textData + text); undoStack.add(EditorAction(pageIndex, null, text, null, true)); redoStack.clear(); activePageIndex = pageIndex }
     fun setTool(tool: DrawingTool) { if (currentTool == DrawingTool.SELECTION && tool != DrawingTool.SELECTION) commitSelection(); currentTool = tool }
+
     fun processSelection(pageIndex: Int, pathPoints: List<PointData>) {
         commitSelection()
         if (pathPoints.size < 3) return
         val page = currentPages[pageIndex]
+
         val strokesToSelect = mutableListOf<StrokeData>(); val remainingStrokes = mutableListOf<StrokeData>()
         page.drawingData.forEach { stroke -> val isSelected = stroke.points.any { p -> if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last()) }; if (isSelected && !stroke.isEraser) strokesToSelect.add(stroke) else remainingStrokes.add(stroke) }
+
         val textsToSelect = mutableListOf<TextData>(); val remainingTexts = mutableListOf<TextData>()
         page.textData.forEach { text -> val isSelected = if (selectionMode == 0) isPointInPolygon(PointData(text.x, text.y), pathPoints) else isPointInRect(PointData(text.x, text.y), pathPoints.first(), pathPoints.last()); if (isSelected) textsToSelect.add(text) else remainingTexts.add(text) }
-        if (strokesToSelect.isNotEmpty() || textsToSelect.isNotEmpty()) { selectedStrokes.addAll(strokesToSelect); selectedTexts.addAll(textsToSelect); selectionPageIndex = pageIndex; currentPages[pageIndex] = page.copy(drawingData = remainingStrokes, textData = remainingTexts) }
-    }
-    fun moveSelection(dx: Float, dy: Float) { selectedStrokes.clear(); selectedStrokes.addAll(selectedStrokes.map { it.translate(dx, dy) }); selectedTexts.clear(); selectedTexts.addAll(selectedTexts.map { it.copy(x = it.x + dx, y = it.y + dy) }) }
-    fun commitSelection() { if ((selectedStrokes.isNotEmpty() || selectedTexts.isNotEmpty()) && selectionPageIndex != -1) { val page = currentPages[selectionPageIndex]; currentPages[selectionPageIndex] = page.copy(drawingData = page.drawingData + selectedStrokes, textData = page.textData + selectedTexts); selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, true)) }; selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, true)) }; redoStack.clear(); selectedStrokes.clear(); selectedTexts.clear(); selectionPageIndex = -1 } }
-    fun deleteSelection() { selectedStrokes.clear(); selectedTexts.clear(); selectionPageIndex = -1 }
-    fun changeSelectionColor(newColorArgb: Int) { selectedStrokes.clear(); selectedStrokes.addAll(selectedStrokes.map { it.copy(colorArgb = newColorArgb) }); selectedTexts.clear(); selectedTexts.addAll(selectedTexts.map { it.copy(colorArgb = newColorArgb) }) }
 
+        val imagesToSelect = mutableListOf<com.midknight.pixelnotes.domain.ImageData>(); val remainingImages = mutableListOf<com.midknight.pixelnotes.domain.ImageData>()
+        page.imageData.forEach { img ->
+            val corners = listOf(PointData(img.x, img.y), PointData(img.x + img.width, img.y), PointData(img.x, img.y + img.height), PointData(img.x + img.width, img.y + img.height))
+            val isSelected = corners.any { p -> if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last()) }
+            if (isSelected) imagesToSelect.add(img) else remainingImages.add(img)
+        }
+
+        if (strokesToSelect.isNotEmpty() || textsToSelect.isNotEmpty() || imagesToSelect.isNotEmpty()) {
+            selectedStrokes.addAll(strokesToSelect); selectedTexts.addAll(textsToSelect); selectedImages.addAll(imagesToSelect)
+            selectionPageIndex = pageIndex
+            currentPages[pageIndex] = page.copy(drawingData = remainingStrokes, textData = remainingTexts, imageData = remainingImages)
+        }
+    }
+
+    fun moveSelection(dx: Float, dy: Float) {
+        selectedStrokes.clear(); selectedStrokes.addAll(selectedStrokes.map { it.translate(dx, dy) })
+        selectedTexts.clear(); selectedTexts.addAll(selectedTexts.map { it.copy(x = it.x + dx, y = it.y + dy) })
+        val movedImages = selectedImages.map { it.copy(x = it.x + dx, y = it.y + dy) }
+        selectedImages.clear(); selectedImages.addAll(movedImages)
+    }
+
+    fun scaleSelection(scaleFactor: Float, pivotX: Float, pivotY: Float) {
+        if (scaleFactor <= 0f || scaleFactor.isNaN()) return
+
+        val scaledStrokes = selectedStrokes.map { stroke ->
+            stroke.copy(
+                strokeWidth = stroke.strokeWidth * scaleFactor,
+                points = stroke.points.map { p -> PointData(pivotX + (p.x - pivotX) * scaleFactor, pivotY + (p.y - pivotY) * scaleFactor) }
+            )
+        }
+        selectedStrokes.clear(); selectedStrokes.addAll(scaledStrokes)
+
+        val scaledTexts = selectedTexts.map { text ->
+            text.copy(
+                x = pivotX + (text.x - pivotX) * scaleFactor,
+                y = pivotY + (text.y - pivotY) * scaleFactor,
+                fontSize = text.fontSize * scaleFactor
+            )
+        }
+        selectedTexts.clear(); selectedTexts.addAll(scaledTexts)
+
+        val scaledImages = selectedImages.map { img ->
+            img.copy(
+                x = pivotX + (img.x - pivotX) * scaleFactor,
+                y = pivotY + (img.y - pivotY) * scaleFactor,
+                width = img.width * scaleFactor,
+                height = img.height * scaleFactor
+            )
+        }
+        selectedImages.clear(); selectedImages.addAll(scaledImages)
+    }
+
+    fun commitSelection() {
+        if ((selectedStrokes.isNotEmpty() || selectedTexts.isNotEmpty() || selectedImages.isNotEmpty()) && selectionPageIndex != -1) {
+            val page = currentPages[selectionPageIndex]
+            currentPages[selectionPageIndex] = page.copy(drawingData = page.drawingData + selectedStrokes, textData = page.textData + selectedTexts, imageData = page.imageData + selectedImages)
+            selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, null, true)) }
+            selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, null, true)) }
+            selectedImages.forEach { undoStack.add(EditorAction(selectionPageIndex, null, null, it, true)) }
+            redoStack.clear(); selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1
+        }
+    }
+
+    fun deleteSelection() { selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1 }
+    fun changeSelectionColor(newColorArgb: Int) { selectedStrokes.clear(); selectedStrokes.addAll(selectedStrokes.map { it.copy(colorArgb = newColorArgb) }); selectedTexts.clear(); selectedTexts.addAll(selectedTexts.map { it.copy(colorArgb = newColorArgb) }) }
     // --- PAGE MANAGEMENT ---
     fun addNewPage() { commitSelection(); currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = currentPages.size)); activePageIndex = currentPages.lastIndex }
     fun deletePageAt(index: Int) { commitSelection(); if (currentPages.size > 1) { currentPages.removeAt(index); if (activePageIndex >= currentPages.size) activePageIndex = currentPages.size - 1 } }
@@ -98,11 +185,14 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun updateActivePageCanvasColor(color: Int) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(canvasColor = color) }
 
     // --- CONTINUOUS DRAWING ENGINE ---
-    fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke); undoStack.add(EditorAction(pageIndex, stroke, null, true)); redoStack.clear(); activePageIndex = pageIndex }
-    fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke }); undoStack.add(EditorAction(pageIndex, stroke, null, false)); redoStack.clear(); activePageIndex = pageIndex }
-    fun undo() { commitSelection(); val action = undoStack.removeLastOrNull() ?: return; redoStack.add(action); val page = currentPages[action.pageIndex]; if (action.stroke != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke }) else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke) } else if (action.text != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id }) else currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text) }; activePageIndex = action.pageIndex }
-    fun redo() { commitSelection(); val action = redoStack.removeLastOrNull() ?: return; undoStack.add(action); val page = currentPages[action.pageIndex]; if (action.stroke != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke) else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke }) } else if (action.text != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text) else currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id }) }; activePageIndex = action.pageIndex }
-    fun isNoteBlank(): Boolean { if (currentTitle != "New Note" || currentPages.size > 1) return false; val p = currentPages.firstOrNull() ?: return true; return p.drawingData.isEmpty() && p.textData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1 }
+    fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke); undoStack.add(EditorAction(pageIndex, stroke, null, null, true)); redoStack.clear(); activePageIndex = pageIndex }
+    fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke }); undoStack.add(EditorAction(pageIndex, stroke, null, null, false)); redoStack.clear(); activePageIndex = pageIndex }
+
+    // Motor Undo adaptado para soportar las imágenes flotantes
+    fun undo() { commitSelection(); val action = undoStack.removeLastOrNull() ?: return; redoStack.add(action); val page = currentPages[action.pageIndex]; if (action.stroke != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke }) else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke) } else if (action.text != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id }) else currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text) } else if (action.image != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id }) else currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image) }; activePageIndex = action.pageIndex }
+    fun redo() { commitSelection(); val action = redoStack.removeLastOrNull() ?: return; undoStack.add(action); val page = currentPages[action.pageIndex]; if (action.stroke != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke) else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke }) } else if (action.text != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text) else currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id }) } else if (action.image != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image) else currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id }) }; activePageIndex = action.pageIndex }
+
+    fun isNoteBlank(): Boolean { if (currentTitle != "New Note" || currentPages.size > 1) return false; val p = currentPages.firstOrNull() ?: return true; return p.drawingData.isEmpty() && p.textData.isEmpty() && p.imageData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1 }
 
     // --- ROUTING & SAVING ---
     fun openNoteForEditing(noteWP: NoteWithPages?) {
@@ -196,26 +286,14 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         }
     }
 
-    // AQUÍ APLICAMOS TU IDEA DE BORRADO DE ARCHIVOS EN LA ELIMINACIÓN DE NOTA
     fun deleteSelectedNotes() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             selectedNotes.forEach { noteWP ->
-                // Recolector de Basura Inteligente: Destruye el archivo PDF físico asociado a esta nota
-                noteWP.pages.forEach { page ->
-                    page.backgroundUri?.let { uri ->
-                        if (uri.contains("?pdfPage=")) {
-                            val path = uri.split("?pdfPage=")[0]
-                            val file = java.io.File(path)
-                            if (file.exists()) file.delete()
-                        }
-                    }
-                }
+                noteWP.pages.forEach { page -> page.backgroundUri?.let { uri -> if (uri.contains("?pdfPage=")) { val path = uri.split("?pdfPage=")[0]; val file = java.io.File(path); if (file.exists()) file.delete() } } }
                 dao.deleteNote(noteWP.note)
                 dao.deletePagesByNoteId(noteWP.note.id)
             }
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                clearSelection()
-            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { clearSelection() }
         }
     }
 

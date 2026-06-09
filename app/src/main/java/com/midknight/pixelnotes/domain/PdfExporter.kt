@@ -67,6 +67,20 @@ class PdfExporter(private val context: Context) {
             }
         }
 
+        page.imageData.forEach { img ->
+            try {
+                val uri = Uri.parse(img.uri)
+                context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    val bitmap = BitmapFactory.decodeStream(inputStream)
+                    if (bitmap != null) {
+                        val destRect = Rect(img.x.toInt(), img.y.toInt(), (img.x + img.width).toInt(), (img.y + img.height).toInt())
+                        pdfCanvas.drawBitmap(bitmap, null, destRect, null)
+                        bitmap.recycle()
+                    }
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+
         val strokeBitmap = Bitmap.createBitmap(pdfWidth, pdfHeight, Bitmap.Config.ARGB_8888)
         val strokeCanvas = Canvas(strokeBitmap)
         val paint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }

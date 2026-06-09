@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -30,14 +31,16 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import coil.compose.rememberAsyncImagePainter
 import com.midknight.pixelnotes.data.CustomFont
+import com.midknight.pixelnotes.domain.ImageData
 import com.midknight.pixelnotes.domain.PointData
 import com.midknight.pixelnotes.domain.StrokeData
 import com.midknight.pixelnotes.domain.TextData
 import com.midknight.pixelnotes.domain.TypefaceManager
 import com.midknight.pixelnotes.ui.viewmodels.DrawingTool
 
-fun getSelectionBounds(strokes: List<StrokeData>, texts: List<TextData>): Rect {
+fun getSelectionBounds(strokes: List<StrokeData>, texts: List<TextData>, images: List<ImageData>): Rect {
     var minX = Float.MAX_VALUE
     var minY = Float.MAX_VALUE
     var maxX = Float.MIN_VALUE
@@ -61,6 +64,13 @@ fun getSelectionBounds(strokes: List<StrokeData>, texts: List<TextData>): Rect {
         if (textData.y > maxY) maxY = textData.y
     }
 
+    images.forEach { img ->
+        if (img.x < minX) minX = img.x
+        if (img.y < minY) minY = img.y
+        if (img.x + img.width > maxX) maxX = img.x + img.width
+        if (img.y + img.height > maxY) maxY = img.y + img.height
+    }
+
     if (minX == Float.MAX_VALUE) return Rect.Zero
     return Rect(minX, minY, maxX, maxY)
 }
@@ -72,6 +82,8 @@ fun DrawingCanvas(
     selectedStrokes: List<StrokeData>,
     texts: List<TextData>,
     selectedTexts: List<TextData>,
+    images: List<ImageData>,
+    selectedImages: List<ImageData>,
     customFonts: List<CustomFont>,
     isSelectionActiveOnPage: Boolean,
     selectionMode: Int,
@@ -85,6 +97,7 @@ fun DrawingCanvas(
     onTextToolTap: (Float, Float) -> Unit,
     onProcessSelection: (List<PointData>) -> Unit,
     onMoveSelection: (Float, Float) -> Unit,
+    onScaleSelection: (Float, Float, Float) -> Unit, // <--- LA FUNCIÓN DE ESCALADO QUE FALTABA
     onCommitSelection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -102,8 +115,12 @@ fun DrawingCanvas(
     val updatedStrokes by rememberUpdatedState(strokes)
     val updatedSelectedStrokes by rememberUpdatedState(selectedStrokes)
     val updatedSelectedTexts by rememberUpdatedState(selectedTexts)
+    val updatedSelectedImages by rememberUpdatedState(selectedImages)
     val updatedIsSelectionActive by rememberUpdatedState(isSelectionActiveOnPage)
     val updatedSelectionMode by rememberUpdatedState(selectionMode)
+
+    val baseImagePainters = images.map { it to rememberAsyncImagePainter(it.uri) }
+    val selectedImagePainters = selectedImages.map { it to rememberAsyncImagePainter(it.uri) }
 
     Canvas(
         modifier = modifier
@@ -120,13 +137,8 @@ fun DrawingCanvas(
                     val isStylusOrEraser = down.type == PointerType.Stylus || down.type == PointerType.Eraser
                     if (isStylusOrEraser) stylusModeActive = true
 
-                    val isAllowedTouch = if (updatedFingerDrawingEnabled) {
-                        !stylusModeActive || isStylusOrEraser
-                    } else {
-                        isStylusOrEraser
-                    }
+                    val isAllowedTouch = if (updatedFingerDrawingEnabled) { !stylusModeActive || isStylusOrEraser } else { isStylusOrEraser }
 
-                    // --- TEXT TOOL INTERCEPTION ---
                     if (updatedTool == DrawingTool.TEXT && isAllowedTouch) {
                         val touchX = down.position.x / scaleRatio
                         val touchY = down.position.y / scaleRatio
@@ -134,62 +146,101 @@ fun DrawingCanvas(
                         return@awaitEachGesture
                     }
 
-                    // --- SELECTION TOOL LOGIC ---
+                    // --- SELECTION TOOL LOGIC CON TIRADORES ---
                     if (updatedTool == DrawingTool.SELECTION && isAllowedTouch) {
                         val touchX = down.position.x / scaleRatio
                         val touchY = down.position.y / scaleRatio
-                        val bounds = getSelectionBounds(updatedSelectedStrokes, updatedSelectedTexts)
+                        val bounds = getSelectionBounds(updatedSelectedStrokes, updatedSelectedTexts, updatedSelectedImages)
 
-                        val isTouchingSelection = updatedIsSelectionActive &&
-                                touchX >= bounds.left - 40f && touchX <= bounds.right + 40f &&
-                                touchY >= bounds.top - 40f && touchY <= bounds.bottom + 40f
+                        if (updatedIsSelectionActive && bounds != Rect.Zero) {
+                            val pad = 20f
+                            val left = bounds.left - pad
+                            val top = bounds.top - pad
+                            val right = bounds.right + pad
+                            val bottom = bounds.bottom + pad
+                            val hitRadius = 80f
 
-                        if (isTouchingSelection) {
-                            var prevTx = touchX
-                            var prevTy = touchY
-                            do {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id }
-                                if (change != null && change.pressed) {
-                                    change.consume()
-                                    val currTx = change.position.x / scaleRatio
-                                    val currTy = change.position.y / scaleRatio
-                                    onMoveSelection(currTx - prevTx, currTy - prevTy)
-                                    prevTx = currTx
-                                    prevTy = currTy
-                                }
-                            } while (event.changes.any { it.pressed })
-                            return@awaitEachGesture
-                        } else {
-                            onCommitSelection()
-                            val path = Path().apply { moveTo(touchX, touchY) }
-                            val points = mutableListOf(PointData(touchX, touchY))
-                            currentPath = path
-                            currentPoints = points
-                            var prevX = touchX
-                            var prevY = touchY
+                            fun dist(x1: Float, y1: Float, x2: Float, y2: Float) = kotlin.math.hypot(x2 - x1, y2 - y1)
 
-                            do {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id }
-                                if (change != null && change.pressed) {
-                                    change.consume()
-                                    val x = change.position.x / scaleRatio
-                                    val y = change.position.y / scaleRatio
-                                    path.lineTo(x, y)
-                                    points.add(PointData(x, y))
-                                    prevX = x
-                                    prevY = y
-                                    trigger++
-                                }
-                            } while (event.changes.any { it.pressed })
+                            // Detectar si tocó una esquina (Tiradores Azules)
+                            val isTL = dist(touchX, touchY, left, top) < hitRadius
+                            val isTR = dist(touchX, touchY, right, top) < hitRadius
+                            val isBL = dist(touchX, touchY, left, bottom) < hitRadius
+                            val isBR = dist(touchX, touchY, right, bottom) < hitRadius
 
-                            if (updatedSelectionMode == 0 && points.size > 2) path.lineTo(points.first().x, points.first().y)
-                            onProcessSelection(points.toList())
-                            currentPath = null
-                            currentPoints = mutableListOf()
-                            return@awaitEachGesture
+                            if (isTL || isTR || isBL || isBR) {
+                                val pivotX = if (isTL || isBL) right else left
+                                val pivotY = if (isTL || isTR) bottom else top
+                                var prevDist = dist(pivotX, pivotY, touchX, touchY)
+
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change != null && change.pressed) {
+                                        change.consume()
+                                        val currX = change.position.x / scaleRatio
+                                        val currY = change.position.y / scaleRatio
+                                        val currDist = dist(pivotX, pivotY, currX, currY)
+                                        val scale = currDist / prevDist
+                                        if (scale > 0.1f && scale < 5f) {
+                                            onScaleSelection(scale, pivotX, pivotY)
+                                            prevDist = currDist
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                                return@awaitEachGesture
+                            }
+
+                            // Si tocó el centro de la imagen (Mover)
+                            val isInside = touchX >= left - 40f && touchX <= right + 40f && touchY >= top - 40f && touchY <= bottom + 40f
+                            if (isInside) {
+                                var prevTx = touchX
+                                var prevTy = touchY
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change != null && change.pressed) {
+                                        change.consume()
+                                        val currTx = change.position.x / scaleRatio
+                                        val currTy = change.position.y / scaleRatio
+                                        onMoveSelection(currTx - prevTx, currTy - prevTy)
+                                        prevTx = currTx
+                                        prevTy = currTy
+                                    }
+                                } while (event.changes.any { it.pressed })
+                                return@awaitEachGesture
+                            }
                         }
+
+                        // Si tocó fuera, hacer un nuevo Lazo
+                        onCommitSelection()
+                        val path = Path().apply { moveTo(touchX, touchY) }
+                        val points = mutableListOf(PointData(touchX, touchY))
+                        currentPath = path
+                        currentPoints = points
+                        var prevX = touchX
+                        var prevY = touchY
+
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change != null && change.pressed) {
+                                change.consume()
+                                val x = change.position.x / scaleRatio
+                                val y = change.position.y / scaleRatio
+                                path.lineTo(x, y)
+                                points.add(PointData(x, y))
+                                prevX = x
+                                prevY = y
+                                trigger++
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        if (updatedSelectionMode == 0 && points.size > 2) path.lineTo(points.first().x, points.first().y)
+                        onProcessSelection(points.toList())
+                        currentPath = null
+                        currentPoints = mutableListOf()
+                        return@awaitEachGesture
                     }
 
                     // --- DRAWING & ERASER LOGIC ---
@@ -207,7 +258,9 @@ fun DrawingCanvas(
                                 val y = change.position.y / scaleRatio
                                 val hitRadiusSq = 2500f
                                 updatedStrokes.toList().forEach { stroke ->
-                                    if (stroke.points.any { p -> val dx = p.x - x; val dy = p.y - y; (dx * dx + dy * dy) < hitRadiusSq }) { onStrokeRemove(stroke) }
+                                    if (stroke.points.any { p -> val dx = p.x - x; val dy = p.y - y; (dx * dx + dy * dy) < hitRadiusSq }) {
+                                        onStrokeRemove(stroke)
+                                    }
                                 }
                             }
                         } while (event.changes.any { it.pressed })
@@ -259,12 +312,21 @@ fun DrawingCanvas(
 
         withTransform({ scale(scaleX = scaleRatio, scaleY = scaleRatio, pivot = Offset.Zero) }) {
 
+            // 1. Dibujar Imágenes Base
+            baseImagePainters.forEach { (img, painter) ->
+                translate(left = img.x, top = img.y) {
+                    with(painter) { draw(size = Size(img.width, img.height)) }
+                }
+            }
+
+            // 2. Dibujar Trazos
             strokes.forEach { strokeData ->
                 val color = if (strokeData.isEraser) Color.Transparent else Color(strokeData.colorArgb).copy(alpha = if (strokeData.isHighlighter) 0.4f else 1f)
                 val blend = if (strokeData.isEraser) BlendMode.Clear else if (strokeData.isHighlighter) BlendMode.Multiply else BlendMode.SrcOver
                 drawPath(path = strokeData.toPath(), color = color, style = Stroke(width = strokeData.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round), blendMode = blend)
             }
 
+            // 3. Dibujar Textos
             texts.forEach { textData ->
                 val fontInfo = customFonts.find { it.name == textData.fontName }
                 val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName)
@@ -274,6 +336,7 @@ fun DrawingCanvas(
                 }
             }
 
+            // 4. Dibujar Elementos Seleccionados y Caja con Tiradores
             if (updatedIsSelectionActive) {
                 updatedSelectedStrokes.forEach { strokeData ->
                     val color = Color(strokeData.colorArgb).copy(alpha = if (strokeData.isHighlighter) 0.4f else 1f)
@@ -287,10 +350,30 @@ fun DrawingCanvas(
                         drawText(textData.text, textData.x, textData.y, paint)
                     }
                 }
+                selectedImagePainters.forEach { (img, painter) ->
+                    translate(left = img.x, top = img.y) {
+                        with(painter) { draw(size = Size(img.width, img.height), alpha = 0.5f) }
+                    }
+                }
 
-                val bounds = getSelectionBounds(updatedSelectedStrokes, updatedSelectedTexts)
+                val bounds = getSelectionBounds(updatedSelectedStrokes, updatedSelectedTexts, updatedSelectedImages)
                 if (bounds != Rect.Zero) {
-                    drawRect(color = Color.Blue, topLeft = Offset(bounds.left - 10f, bounds.top - 10f), size = Size(bounds.width + 20f, bounds.height + 20f), style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f))), alpha = 0.5f)
+                    val pad = 20f
+                    val left = bounds.left - pad
+                    val top = bounds.top - pad
+                    val right = bounds.right + pad
+                    val bottom = bounds.bottom + pad
+
+                    // CAJA DE SELECCIÓN
+                    drawRect(color = Color.Blue, topLeft = Offset(left, top), size = Size(right - left, bottom - top), style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f))), alpha = 0.5f)
+
+                    // DIBUJAR LOS 4 TIRADORES DE LAS ESQUINAS
+                    val handleColor = Color(0xFF2196F3)
+                    val handles = listOf(Offset(left, top), Offset(right, top), Offset(left, bottom), Offset(right, bottom))
+                    handles.forEach { corner ->
+                        drawCircle(color = handleColor, radius = 25f, center = corner) // Borde azul
+                        drawCircle(color = Color.White, radius = 12f, center = corner) // Centro blanco
+                    }
                 }
             }
 
@@ -298,7 +381,8 @@ fun DrawingCanvas(
                 if (updatedTool == DrawingTool.SELECTION) {
                     if (updatedSelectionMode == 0) { drawPath(path, color = Color.Gray, style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f)))) }
                     else if (currentPoints.isNotEmpty()) {
-                        val first = currentPoints.first(); val last = currentPoints.last()
+                        val first = currentPoints.first()
+                        val last = currentPoints.last()
                         drawRect(color = Color.Gray, topLeft = Offset(minOf(first.x, last.x), minOf(first.y, last.y)), size = Size(kotlin.math.abs(last.x - first.x), kotlin.math.abs(last.y - first.y)), style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f))))
                     }
                 } else {
