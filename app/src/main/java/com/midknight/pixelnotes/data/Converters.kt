@@ -3,6 +3,8 @@ package com.midknight.pixelnotes.data
 import androidx.room.TypeConverter
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.midknight.pixelnotes.domain.AudioData
+import com.midknight.pixelnotes.domain.ImageData
 import com.midknight.pixelnotes.domain.StrokeData
 import com.midknight.pixelnotes.domain.TextData
 
@@ -28,11 +30,20 @@ class Converters {
     }
 
     @TypeConverter
-    fun fromImageList(value: List<com.midknight.pixelnotes.domain.ImageData>): String = gson.toJson(value)
+    fun fromImageList(value: List<ImageData>): String = gson.toJson(value)
 
     @TypeConverter
-    fun toImageList(value: String): List<com.midknight.pixelnotes.domain.ImageData> {
-        val type = object : TypeToken<List<com.midknight.pixelnotes.domain.ImageData>>() {}.type
+    fun toImageList(value: String): List<ImageData> {
+        val type = object : TypeToken<List<ImageData>>() {}.type
+        return gson.fromJson(value, type) ?: emptyList()
+    }
+
+    @TypeConverter
+    fun fromAudioList(value: List<AudioData>): String = gson.toJson(value)
+
+    @TypeConverter
+    fun toAudioList(value: String): List<AudioData> {
+        val type = object : TypeToken<List<AudioData>>() {}.type
         return gson.fromJson(value, type) ?: emptyList()
     }
 }

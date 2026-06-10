@@ -4,9 +4,10 @@ import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.Relation
+import com.midknight.pixelnotes.domain.AudioData
+import com.midknight.pixelnotes.domain.ImageData
 import com.midknight.pixelnotes.domain.StrokeData
 import com.midknight.pixelnotes.domain.TextData
-import com.midknight.pixelnotes.domain.ImageData
 
 @Entity(tableName = "notes")
 data class Note(
@@ -29,6 +30,7 @@ data class PageEntity(
     val drawingData: List<StrokeData> = emptyList(),
     val textData: List<TextData> = emptyList(),
     val imageData: List<ImageData> = emptyList(),
+    val audioData: List<AudioData> = emptyList(),
     val backgroundUri: String? = null,
     val paperStyle: Int = 0,
     val canvasColor: Int = -1
