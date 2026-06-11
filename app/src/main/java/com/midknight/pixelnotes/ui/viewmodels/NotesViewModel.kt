@@ -3,6 +3,7 @@ package com.midknight.pixelnotes.ui.viewmodels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -29,12 +30,13 @@ import java.util.Locale
 
 enum class DrawingTool { PEN, HIGHLIGHTER, ERASER, TEXT, SELECTION }
 
-data class EditorAction(val pageIndex: Int, val stroke: StrokeData?, val text: TextData?, val image: com.midknight.pixelnotes.domain.ImageData?, val isAdd: Boolean)
-
-class NotesViewModel(private val dao: NoteDao) : ViewModel() {
+data class EditorAction(val pageIndex: Int, val stroke: StrokeData?, val text: TextData?, val image: com.midknight.pixelnotes.domain.ImageData?, val audio: com.midknight.pixelnotes.domain.AudioData? = null, val isAdd: Boolean)
+class NotesViewModel(private val dao: NoteDao, private val context: android.content.Context) : ViewModel() {
     val notes = dao.getAllNotesWithPages().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val folders = dao.getAllFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val customFonts = dao.getAllCustomFonts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val prefs = context.getSharedPreferences("pixel_notes_prefs", android.content.Context.MODE_PRIVATE)
 
     var currentFolderFilter by mutableStateOf("All Notes")
     var currentScreen by mutableIntStateOf(0)
@@ -73,6 +75,22 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
 
     var isImportingPdf by mutableStateOf(false)
     var pendingCameraUri by mutableStateOf<android.net.Uri?>(null)
+    var isRecording by mutableStateOf(false)
+    var recordingDuration by mutableLongStateOf(0L)
+    var recordingAmplitude by mutableFloatStateOf(0f)
+    private var mediaRecorder: android.media.MediaRecorder? = null
+    private var currentRecordingFile: java.io.File? = null
+    private var recordingJob: kotlinx.coroutines.Job? = null
+    var isPlaying by mutableStateOf(false)
+    private var mediaPlayer: android.media.MediaPlayer? = null
+    var activeAudioUri by mutableStateOf<String?>(null)
+    var isSyncing by mutableStateOf(false)
+    var userEmail by mutableStateOf<String?>(null)
+    val isUserSignedIn get() = userEmail != null
+
+    init {
+        userEmail = prefs.getString("user_email", null)
+    }
 
     fun createImageUri(context: android.content.Context): android.net.Uri? {
         val values = android.content.ContentValues().apply {
@@ -161,9 +179,9 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
         if ((selectedStrokes.isNotEmpty() || selectedTexts.isNotEmpty() || selectedImages.isNotEmpty()) && selectionPageIndex != -1) {
             val page = currentPages[selectionPageIndex]
             currentPages[selectionPageIndex] = page.copy(drawingData = page.drawingData + selectedStrokes, textData = page.textData + selectedTexts, imageData = page.imageData + selectedImages)
-            selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, null, true)) }
-            selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, null, true)) }
-            selectedImages.forEach { undoStack.add(EditorAction(selectionPageIndex, null, null, it, true)) }
+            selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, null, null, true)) }
+            selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, null, null, true)) }
+            selectedImages.forEach { undoStack.add(EditorAction(selectionPageIndex, null, null, it, null, true)) }
             redoStack.clear(); selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1
         }
     }
@@ -183,12 +201,49 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun updateActivePagePaperStyle(style: Int) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(paperStyle = style) }
     fun updateActivePageCanvasColor(color: Int) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(canvasColor = color) }
 
-    fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke); undoStack.add(EditorAction(pageIndex, stroke, null, null, true)); redoStack.clear(); activePageIndex = pageIndex }
-    fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke }); undoStack.add(EditorAction(pageIndex, stroke, null, null, false)); redoStack.clear(); activePageIndex = pageIndex }
+    fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke); undoStack.add(EditorAction(pageIndex, stroke, null, null, null, true)); redoStack.clear(); activePageIndex = pageIndex }
+    fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke }); undoStack.add(EditorAction(pageIndex, stroke, null, null, null, false)); redoStack.clear(); activePageIndex = pageIndex }
+    fun undo() {
+        commitSelection()
+        val action = undoStack.removeLastOrNull() ?: return
+        redoStack.add(action)
+        val page = currentPages[action.pageIndex]
+        if (action.stroke != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
+            else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
+        } else if (action.text != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id })
+            else currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text)
+        } else if (action.image != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id })
+            else currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image)
+        } else if (action.audio != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(audioData = page.audioData.filter { it.id != action.audio.id })
+            else currentPages[action.pageIndex] = page.copy(audioData = page.audioData + action.audio)
+        }
+        activePageIndex = action.pageIndex
+    }
 
-    fun undo() { commitSelection(); val action = undoStack.removeLastOrNull() ?: return; redoStack.add(action); val page = currentPages[action.pageIndex]; if (action.stroke != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke }) else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke) } else if (action.text != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id }) else currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text) } else if (action.image != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id }) else currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image) }; activePageIndex = action.pageIndex }
-    fun redo() { commitSelection(); val action = redoStack.removeLastOrNull() ?: return; undoStack.add(action); val page = currentPages[action.pageIndex]; if (action.stroke != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke) else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke }) } else if (action.text != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text) else currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id }) } else if (action.image != null) { if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image) else currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id }) }; activePageIndex = action.pageIndex }
-
+    fun redo() {
+        commitSelection()
+        val action = redoStack.removeLastOrNull() ?: return
+        undoStack.add(action)
+        val page = currentPages[action.pageIndex]
+        if (action.stroke != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
+            else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
+        } else if (action.text != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text)
+            else currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id })
+        } else if (action.image != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image)
+            else currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id })
+        } else if (action.audio != null) {
+            if (action.isAdd) currentPages[action.pageIndex] = page.copy(audioData = page.audioData + action.audio)
+            else currentPages[action.pageIndex] = page.copy(audioData = page.audioData.filter { it.id != action.audio.id })
+        }
+        activePageIndex = action.pageIndex
+    }
     fun isNoteBlank(): Boolean { if (currentTitle != "New Note" || currentPages.size > 1) return false; val p = currentPages.firstOrNull() ?: return true; return p.drawingData.isEmpty() && p.textData.isEmpty() && p.imageData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1 }
 
     fun openNoteForEditing(noteWP: NoteWithPages?, isInfinite: Boolean = false) {
@@ -326,11 +381,214 @@ class NotesViewModel(private val dao: NoteDao) : ViewModel() {
     fun moveSelectedNotes(newFolder: String) { viewModelScope.launch { selectedNotes.forEach { dao.updateNote(it.note.copy(folder = newFolder)) }; clearSelection() } }
     fun createFolder(name: String, parentPath: String?) { val path = if (parentPath == null) name else "$parentPath/$name"; viewModelScope.launch { dao.insertFolder(FolderEntity(path = path, name = name, parentPath = parentPath)) } }
     fun renameFolder(oldPath: String, newName: String) { val parentPath = oldPath.substringBeforeLast('/', ""); val newPath = if (parentPath.isEmpty()) newName else "$parentPath/$newName"; viewModelScope.launch { dao.renameFoldersCascade(oldPath, newPath, newName); dao.renameNotesFolderCascade(oldPath, newPath); if (currentFolderFilter == oldPath || currentFolderFilter.startsWith("$oldPath/")) currentFolderFilter = newPath + currentFolderFilter.removePrefix(oldPath) } }
+
+    fun startRecording(context: android.content.Context) {
+        val audioDir = java.io.File(context.filesDir, "audio_notes")
+        if (!audioDir.exists()) audioDir.mkdirs()
+
+        val fileName = "audio_${System.currentTimeMillis()}.m4a"
+        currentRecordingFile = java.io.File(audioDir, fileName)
+
+        mediaRecorder = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            android.media.MediaRecorder(context)
+        } else {
+            @Suppress("DEPRECATION")
+            android.media.MediaRecorder()
+        }.apply {
+            setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            setOutputFile(currentRecordingFile?.absolutePath)
+            try {
+                prepare()
+                start()
+                isRecording = true
+                startRecordingTimer()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun startRecordingTimer() {
+        recordingJob = viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
+            while (isRecording) {
+                recordingDuration = System.currentTimeMillis() - startTime
+                recordingAmplitude = try { mediaRecorder?.maxAmplitude?.toFloat() ?: 0f } catch (e: Exception) { 0f }
+                kotlinx.coroutines.delay(100)
+            }
+        }
+    }
+
+    fun stopRecording() {
+        if (!isRecording) return
+        isRecording = false
+        recordingJob?.cancel()
+        try {
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        mediaRecorder = null
+
+        currentRecordingFile?.let { file ->
+            val audioData = com.midknight.pixelnotes.domain.AudioData(
+                id = java.util.UUID.randomUUID().toString(),
+                uri = file.absolutePath,
+                x = 50f,
+                y = 50f,
+                durationMs = recordingDuration
+            )
+            addAudioToPage(activePageIndex, audioData)
+        }
+        currentRecordingFile = null
+    }
+
+    fun cancelRecording() {
+        if (!isRecording) return
+        isRecording = false
+        recordingJob?.cancel()
+        try {
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+        } catch (e: Exception) { e.printStackTrace() }
+        mediaRecorder = null
+        currentRecordingFile?.delete()
+        currentRecordingFile = null
+    }
+
+    fun playAudio(uri: String) {
+        stopAudio() // Stop any current playback before starting new one
+        activeAudioUri = uri
+        isPlaying = true
+        mediaPlayer = android.media.MediaPlayer().apply {
+            try {
+                setDataSource(uri)
+                prepare()
+                start()
+                setOnCompletionListener { stopAudio() }
+            } catch (e: java.io.IOException) {
+                e.printStackTrace()
+                stopAudio()
+            }
+        }
+    }
+
+    fun stopAudio() {
+        isPlaying = false
+        activeAudioUri = null
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        mediaPlayer = null
+    }
+
+    private fun addAudioToPage(pageIndex: Int, audio: com.midknight.pixelnotes.domain.AudioData) {
+        if (pageIndex !in currentPages.indices) return
+        val page = currentPages[pageIndex]
+        currentPages[pageIndex] = page.copy(audioData = page.audioData + audio)
+        undoStack.add(EditorAction(pageIndex, null, null, null, audio, true))
+        redoStack.clear()
+    }
+
+    fun signIn(context: android.content.Context) {
+        viewModelScope.launch {
+            try {
+                val credentialManager = androidx.credentials.CredentialManager.create(context)
+                val googleIdOption = com.google.android.libraries.identity.googleid.GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(com.midknight.pixelnotes.BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                    .setAutoSelectEnabled(false)
+                    .build()
+
+                val request = androidx.credentials.GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+
+                val result = credentialManager.getCredential(context, request)
+                val credential = result.credential
+
+                if (credential is androidx.credentials.CustomCredential &&
+                    credential.type == com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+
+                    val googleIdTokenCredential = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.createFrom(credential.data)
+
+                    val capturedEmail = googleIdTokenCredential.id
+
+                    if (!capturedEmail.isNullOrEmpty()) {
+                        userEmail = capturedEmail
+                        prefs.edit().putString("user_email", userEmail).apply()
+                        android.widget.Toast.makeText(context, "Signed in as $userEmail", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        throw Exception("Google account has no associated email.")
+                    }
+                }
+            } catch (e: androidx.credentials.exceptions.NoCredentialException) {
+                android.widget.Toast.makeText(context, "Initializing Google Sign-In... please try again", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                android.widget.Toast.makeText(context, "Sign in failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun signOut() { 
+        userEmail = null
+        prefs.edit().remove("user_email").apply()
+    }
+
+    var pendingSyncIntent by mutableStateOf<android.content.Intent?>(null)
+
+    fun backupToCloud(context: android.content.Context) {
+        val email = userEmail ?: return
+        isSyncing = true
+        viewModelScope.launch {
+            val result = com.midknight.pixelnotes.domain.CloudSyncManager(context).backupToDrive(email)
+            isSyncing = false
+
+            val exception = result.exceptionOrNull()
+            if (exception is com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException) {
+                // This is the "NeedRemoteConsent" error - we need to launch the system intent
+                pendingSyncIntent = exception.intent
+            } else if (result.isSuccess) {
+                android.widget.Toast.makeText(context, "Backup successful!", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                android.widget.Toast.makeText(context, "Backup failed: ${exception?.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun restoreFromCloud(context: android.content.Context) {
+        val email = userEmail ?: return
+        isSyncing = true
+        viewModelScope.launch {
+            com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
+            val result = com.midknight.pixelnotes.domain.CloudSyncManager(context).restoreFromDrive(email)
+            isSyncing = false
+            if (result.isSuccess) {
+                android.widget.Toast.makeText(context, "Restore successful! Restarting...", android.widget.Toast.LENGTH_LONG).show()
+                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                (context as? android.app.Activity)?.finish()
+                java.lang.Runtime.getRuntime().exit(0)
+            } else {
+                android.widget.Toast.makeText(context, "Restore failed: ${result.exceptionOrNull()?.message}", android.widget.Toast.LENGTH_LONG).show()
+                com.midknight.pixelnotes.data.NoteDatabase.getDatabase(context)
+            }
+        }
+    }
 }
 
-class NotesViewModelFactory(private val dao: NoteDao) : ViewModelProvider.Factory {
+class NotesViewModelFactory(private val dao: NoteDao, private val context: android.content.Context) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(NotesViewModel::class.java)) return NotesViewModel(dao) as T
+        if (modelClass.isAssignableFrom(NotesViewModel::class.java)) return NotesViewModel(dao, context) as T
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

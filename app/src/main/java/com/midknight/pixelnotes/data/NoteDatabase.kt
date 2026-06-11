@@ -37,5 +37,10 @@ abstract class NoteDatabase : RoomDatabase() {
                 instance
             }
         }
+
+        fun closeDatabase() {
+            INSTANCE?.close()
+            INSTANCE = null
+        }
     }
 }

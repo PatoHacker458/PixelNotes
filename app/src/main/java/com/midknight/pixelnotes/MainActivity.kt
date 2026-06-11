@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             PixelNotesTheme {
-                val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(dao))
+                val viewModel: NotesViewModel = viewModel(factory = NotesViewModelFactory(dao, applicationContext))
                 val notes by viewModel.notes.collectAsState()
                 val folders by viewModel.folders.collectAsState()
                 val context = LocalContext.current

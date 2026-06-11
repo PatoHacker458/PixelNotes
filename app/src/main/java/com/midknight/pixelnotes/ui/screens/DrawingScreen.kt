@@ -114,6 +114,11 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.Note
 import com.midknight.pixelnotes.data.NoteWithPages
@@ -185,6 +190,13 @@ fun DrawingScreen(viewModel: NotesViewModel) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) { if (!viewModel.isNoteBlank()) { viewModel.saveCurrentNote(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())) } } }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) { viewModel.startRecording(context) }
+        else { Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show() }
     }
 
     val colors = listOf(Color.Black, Color.White, Color.Red, Color.Blue, Color.Green, Color(0xFFFBC02D), Color(0xFFE91E63))
@@ -295,6 +307,19 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             onCommitSelection = { viewModel.commitSelection() },
                             modifier = Modifier.fillMaxSize()
                         )
+
+                        page.audioData.forEach { audio ->
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = with(LocalDensity.current) { (audio.x).toDp() }, y = with(LocalDensity.current) { (audio.y).toDp() })
+                                    .size(48.dp).clip(CircleShape)
+                                    .background(if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Color.Red.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
+                                    .clickable { viewModel.playAudio(audio.uri) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(imageVector = if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                            }
+                        }
                     }
                 }
             } else {
@@ -347,6 +372,19 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     onCommitSelection = { viewModel.commitSelection() },
                                     modifier = Modifier.fillMaxSize()
                                 )
+
+                                page.audioData.forEach { audio ->
+                                    Box(
+                                        modifier = Modifier
+                                            .offset(x = with(LocalDensity.current) { (audio.x).toDp() }, y = with(LocalDensity.current) { (audio.y).toDp() })
+                                            .size(48.dp).clip(CircleShape)
+                                            .background(if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Color.Red.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
+                                            .clickable { viewModel.playAudio(audio.uri) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(imageVector = if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                                    }
+                                }
                             }
                         }
                     }
@@ -372,7 +410,26 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 }
             }
 
-            // TOP TOOLBAR UNIFICADA CON MENÚS MATERIAL EXPRESSIVE
+            AnimatedVisibility(
+                visible = viewModel.isRecording || viewModel.isPlaying,
+                enter = expandVertically(), exit = shrinkVertically(),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 80.dp).zIndex(15f)
+            ) {
+                Row(
+                    modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(imageVector = if (viewModel.isRecording) Icons.Default.Mic else Icons.Default.PlayArrow, contentDescription = null, tint = if (viewModel.isRecording) Color.Red else MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text(text = if (viewModel.isRecording) { val s = (viewModel.recordingDuration / 1000) % 60; val m = (viewModel.recordingDuration / (1000 * 60)) % 60; String.format("%02d:%02d", m, s) } else "Playing...", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    if (viewModel.isRecording) {
+                        IconButton(onClick = { viewModel.stopRecording() }) { Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.Red) }
+                        IconButton(onClick = { viewModel.cancelRecording() }) { Icon(Icons.Default.Close, contentDescription = "Cancel") }
+                    } else {
+                        IconButton(onClick = { viewModel.stopAudio() }) { Icon(Icons.Default.Stop, contentDescription = "Stop") }
+                    }
+                }
+            }
+
             Row(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp, start = 16.dp, end = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { viewModel.closeEditing() }) { Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
@@ -414,6 +471,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             DropdownMenuItem(text = { Text("Import PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; pdfImportLauncher.launch("application/pdf") })
                             DropdownMenuItem(text = { Text("Insert Image", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; floatingImagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
                             DropdownMenuItem(text = { Text("Take Photo", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PhotoCamera, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; viewModel.pendingCameraUri = viewModel.createImageUri(context); viewModel.pendingCameraUri?.let { cameraLauncher.launch(it) } })
+                            DropdownMenuItem(text = { Text("Record Audio", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO) })
                         }
                     }
 

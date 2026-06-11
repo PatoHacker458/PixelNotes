@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.LaunchedEffect
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +65,22 @@ fun SettingsScreen(viewModel: NotesViewModel) {
     var pendingFontUri by remember { mutableStateOf<Uri?>(null) }
     var newFontName by remember { mutableStateOf("") }
     var isCleaning by remember { mutableStateOf(false) }
+
+    val syncLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            // User granted permission! Try backup again.
+            viewModel.backupToCloud(context)
+        }
+    }
+
+    LaunchedEffect(viewModel.pendingSyncIntent) {
+        viewModel.pendingSyncIntent?.let { intent ->
+            syncLauncher.launch(intent)
+            viewModel.pendingSyncIntent = null
+        }
+    }
 
     val fontPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -194,6 +211,54 @@ fun SettingsScreen(viewModel: NotesViewModel) {
                     }
                 }
             }
+
+            // --- CLOUD SYNC ---
+            Text(
+                text = "Google Drive Cloud Sync",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(16.dp),
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(16.dp)) {
+                Column {
+                    if (viewModel.userEmail == null) {
+                        Text("Not Signed In", fontWeight = FontWeight.Bold)
+                        Text("Sign in to backup your notes to Google Drive.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = { viewModel.signIn(context) }) {
+                            Text("Sign In with Google")
+                        }
+                    } else {
+                        Text("Signed In as", fontWeight = FontWeight.Bold)
+                        Text(viewModel.userEmail!!, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { viewModel.backupToCloud(context) },
+                                enabled = !viewModel.isSyncing,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (viewModel.isSyncing) "Syncing..." else "Backup Now")
+                            }
+                            Button(
+                                onClick = { viewModel.restoreFromCloud(context) },
+                                enabled = !viewModel.isSyncing,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                            ) {
+                                Text("Restore")
+                            }
+                        }
+                        TextButton(onClick = { viewModel.signOut() }) {
+                            Text("Sign Out", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
