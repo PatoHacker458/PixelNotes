@@ -86,10 +86,14 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     var activeAudioUri by mutableStateOf<String?>(null)
     var isSyncing by mutableStateOf(false)
     var userEmail by mutableStateOf<String?>(null)
+    var userName by mutableStateOf<String?>(null)
+    var userPhotoUri by mutableStateOf<String?>(null)
     val isUserSignedIn get() = userEmail != null
 
     init {
         userEmail = prefs.getString("user_email", null)
+        userName = prefs.getString("user_name", null)
+        userPhotoUri = prefs.getString("user_photo", null)
     }
 
     fun createImageUri(context: android.content.Context): android.net.Uri? {
@@ -519,11 +523,22 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                     val googleIdTokenCredential = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.createFrom(credential.data)
 
                     val capturedEmail = googleIdTokenCredential.id
+                    val capturedName = googleIdTokenCredential.displayName
+                    val capturedPhoto = googleIdTokenCredential.profilePictureUri?.toString()
 
                     if (!capturedEmail.isNullOrEmpty()) {
                         userEmail = capturedEmail
-                        prefs.edit().putString("user_email", userEmail).apply()
-                        android.widget.Toast.makeText(context, "Signed in as $userEmail", android.widget.Toast.LENGTH_SHORT).show()
+                        userName = capturedName
+                        userPhotoUri = capturedPhoto
+                        
+                        prefs.edit()
+                            .putString("user_email", userEmail)
+                            .putString("user_name", userName)
+                            .putString("user_photo", userPhotoUri)
+                            .apply()
+                        
+                        // AUTOMATED SYNC ON SIGN IN
+                        performInitialSync(context, capturedEmail)
                     } else {
                         throw Exception("Google account has no associated email.")
                     }
@@ -537,9 +552,73 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         }
     }
 
-    fun signOut() { 
-        userEmail = null
-        prefs.edit().remove("user_email").apply()
+    private fun performInitialSync(context: android.content.Context, email: String) {
+        isSyncing = true
+        viewModelScope.launch {
+            val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
+            
+            // 1. FIRST: Backup local state to cloud (Merge attempt at file level)
+            if (notes.value.isNotEmpty()) {
+                syncManager.backupToDrive(email)
+            }
+            
+            // 2. IMPORTANT: Close DB before restoring to avoid file lock
+            com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
+
+            // 3. Then restore the merged cloud state
+            val result = syncManager.restoreFromDrive(email)
+            
+            isSyncing = false
+            if (result.isSuccess) {
+                restartApp(context, "")
+            } else {
+                com.midknight.pixelnotes.data.NoteDatabase.getDatabase(context)
+            }
+        }
+    }
+
+    fun signOut(context: android.content.Context) { 
+        val email = userEmail
+        isSyncing = true
+        viewModelScope.launch {
+            if (email != null) {
+                if (notes.value.isNotEmpty()) {
+                    com.midknight.pixelnotes.domain.CloudSyncManager(context).backupToDrive(email)
+                }
+            }
+            
+            // 1. Clear Memory State
+            userEmail = null
+            userName = null
+            userPhotoUri = null
+            
+            // 2. Clear SharedPreferences and FORCE COMMIT to disk before process dies
+            prefs.edit().clear().commit()
+                
+            // 3. Clear Google Credentials Cache
+            try {
+                val credentialManager = androidx.credentials.CredentialManager.create(context)
+                credentialManager.clearCredentialState(androidx.credentials.ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            // 4. Wipe Local Database and Files
+            com.midknight.pixelnotes.domain.CloudSyncManager(context).clearLocalData()
+
+            isSyncing = false
+            restartApp(context, "")
+        }
+    }
+
+    private fun restartApp(context: android.content.Context, message: String) {
+        if (message.isNotBlank()) android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        (context as? android.app.Activity)?.finish()
+        java.lang.Runtime.getRuntime().exit(0)
     }
 
     var pendingSyncIntent by mutableStateOf<android.content.Intent?>(null)

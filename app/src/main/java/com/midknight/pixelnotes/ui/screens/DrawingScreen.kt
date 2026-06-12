@@ -126,6 +126,7 @@ import com.midknight.pixelnotes.data.PageEntity
 import com.midknight.pixelnotes.domain.PdfExporter
 import com.midknight.pixelnotes.domain.TextData
 import com.midknight.pixelnotes.ui.components.DrawingCanvas
+import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
 import com.midknight.pixelnotes.ui.viewmodels.DrawingTool
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 import kotlinx.coroutines.launch
@@ -432,21 +433,39 @@ fun DrawingScreen(viewModel: NotesViewModel) {
 
             Row(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp, start = 16.dp, end = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { viewModel.closeEditing() }) { Icon(Icons.Filled.ArrowBack, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                    ExpressiveIconButton(
+                        icon = Icons.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = { viewModel.closeEditing() }
+                    )
                     TextField(value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it }, modifier = Modifier.width(150.dp), singleLine = true, colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface))
                 }
 
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (!viewModel.isCurrentNoteInfinite) {
-                        IconButton(onClick = { showPagesPanel = !showPagesPanel }) { Icon(Icons.Filled.Layers, contentDescription = "Pages", tint = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
+                        ExpressiveIconButton(
+                            icon = Icons.Filled.Layers,
+                            contentDescription = "Pages",
+                            onClick = { showPagesPanel = !showPagesPanel },
+                            contentColor = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
                         Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
                         Spacer(modifier = Modifier.width(4.dp))
                     }
-                    IconButton(onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled }) { Icon(if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool, contentDescription = null, tint = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
+                    ExpressiveIconButton(
+                        icon = if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool,
+                        contentDescription = "Toggle Finger/Stylus",
+                        onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled },
+                        contentColor = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    )
 
                     Box {
-                        IconButton(onClick = { showPaperMenu = true }) { Icon(Icons.Filled.GridOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        ExpressiveIconButton(
+                            icon = Icons.Filled.GridOn,
+                            contentDescription = "Paper Style",
+                            onClick = { showPaperMenu = true }
+                        )
                         DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
                             DropdownMenuItem(text = { Text("Blank", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.CheckBoxOutlineBlank, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(0); showPaperMenu = false })
                             DropdownMenuItem(text = { Text("Lined", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.ViewHeadline, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(1); showPaperMenu = false })
@@ -456,7 +475,11 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     }
 
                     Box {
-                        IconButton(onClick = { showCanvasColorMenu = true }) { Icon(Icons.Filled.FormatColorFill, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        ExpressiveIconButton(
+                            icon = Icons.Filled.FormatColorFill,
+                            contentDescription = "Canvas Color",
+                            onClick = { showCanvasColorMenu = true }
+                        )
                         DropdownMenu(expanded = showCanvasColorMenu, onDismissRequest = { showCanvasColorMenu = false }) {
                             canvasColors.forEach { colorArgb -> DropdownMenuItem(text = { Text(if (colorArgb == -1) "Default White" else "Solid Color", fontWeight = FontWeight.Bold) }, trailingIcon = { Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(if (colorArgb == -1) Color.White else Color(colorArgb)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)) }, onClick = { viewModel.updateActivePageCanvasColor(colorArgb); showCanvasColorMenu = false }) }
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -466,7 +489,11 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     }
 
                     Box {
-                        IconButton(onClick = { showAddMenu = true }) { Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        ExpressiveIconButton(
+                            icon = Icons.Filled.Add,
+                            contentDescription = "Add Content",
+                            onClick = { showAddMenu = true }
+                        )
                         DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
                             DropdownMenuItem(text = { Text("Import PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; pdfImportLauncher.launch("application/pdf") })
                             DropdownMenuItem(text = { Text("Insert Image", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; floatingImagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
@@ -475,11 +502,23 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         }
                     }
 
-                    IconButton(onClick = { viewModel.undo() }) { Icon(Icons.Filled.Undo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
-                    IconButton(onClick = { viewModel.redo() }) { Icon(Icons.Filled.Redo, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                    ExpressiveIconButton(
+                        icon = Icons.Filled.Undo,
+                        contentDescription = "Undo",
+                        onClick = { viewModel.undo() }
+                    )
+                    ExpressiveIconButton(
+                        icon = Icons.Filled.Redo,
+                        contentDescription = "Redo",
+                        onClick = { viewModel.redo() }
+                    )
 
                     Box {
-                        IconButton(onClick = { showExportMenu = true }) { Icon(Icons.Filled.IosShare, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) }
+                        ExpressiveIconButton(
+                            icon = Icons.Filled.IosShare,
+                            contentDescription = "Share",
+                            onClick = { showExportMenu = true }
+                        )
                         DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
                             DropdownMenuItem(text = { Text("Export Note as PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
                             if (!viewModel.isCurrentNoteInfinite) { DropdownMenuItem(text = { Text("Export Current Page", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.InsertPageBreak, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; singlePageToExport = viewModel.currentPages[viewModel.activePageIndex]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${viewModel.activePageIndex + 1}.pdf") }) }
@@ -499,14 +538,43 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                 }
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     val tools = listOf(DrawingTool.PEN to Icons.Filled.Edit, DrawingTool.HIGHLIGHTER to Icons.Filled.BorderColor, DrawingTool.ERASER to Icons.Filled.LayersClear, DrawingTool.TEXT to Icons.Filled.Title, DrawingTool.SELECTION to Icons.Filled.HighlightAlt)
-                    tools.forEach { (tool, icon) -> val isSelected = viewModel.currentTool == tool; Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).clickable { if (isSelected) showToolOptions = !showToolOptions else { viewModel.setTool(tool); showToolOptions = true } }, contentAlignment = Alignment.Center) { Icon(icon, contentDescription = null, tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface) } }
+                    tools.forEach { (tool, icon) -> 
+                        val isSelected = viewModel.currentTool == tool
+                        ExpressiveIconButton(
+                            icon = icon,
+                            contentDescription = null,
+                            onClick = { if (isSelected) showToolOptions = !showToolOptions else { viewModel.setTool(tool); showToolOptions = true } },
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             }
 
             if (viewModel.isCurrentNoteInfinite) {
-                AnimatedVisibility(visible = true, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) { FloatingActionButton(onClick = { viewModel.cameraResetTrigger++ }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) { Icon(Icons.Default.FilterCenterFocus, contentDescription = "Reset View") } }
+                AnimatedVisibility(visible = true, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) {
+                    ExpressiveIconButton(
+                        icon = Icons.Default.FilterCenterFocus,
+                        contentDescription = "Reset View",
+                        onClick = { viewModel.cameraResetTrigger++ },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        size = 56.dp,
+                        iconSize = 28.dp
+                    )
+                }
             } else {
-                AnimatedVisibility(visible = scale != 1f || offset != Offset.Zero, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) { FloatingActionButton(onClick = { scale = 1f; offset = Offset.Zero }, containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer) { Icon(Icons.Default.FilterCenterFocus, contentDescription = "Reset View") } }
+                AnimatedVisibility(visible = scale != 1f || offset != Offset.Zero, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)) {
+                    ExpressiveIconButton(
+                        icon = Icons.Default.FilterCenterFocus,
+                        contentDescription = "Reset View",
+                        onClick = { scale = 1f; offset = Offset.Zero },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        size = 56.dp,
+                        iconSize = 28.dp
+                    )
+                }
             }
         }
     }

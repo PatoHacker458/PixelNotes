@@ -24,17 +24,12 @@ import androidx.compose.material.icons.filled.AllInbox
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.midknight.pixelnotes.data.FolderEntity
+import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
 
 data class FolderNode(val folder: FolderEntity, val children: List<FolderNode>)
 
@@ -71,58 +67,13 @@ fun buildFolderTree(folders: List<FolderEntity>): List<FolderNode> {
 fun SideMenu(
     currentFolder: String,
     folders: List<FolderEntity>,
-    selectedNotesCount: Int,
     onFolderSelected: (String) -> Unit,
     onSettingsSelected: () -> Unit,
     onCreateFolder: (String, String?) -> Unit,
     onRenameFolder: (String, String) -> Unit,
     onDeleteFolder: (String) -> Unit,
-    onActionMove: () -> Unit,
-    onActionExport: () -> Unit,
-    onActionShare: () -> Unit,
-    onActionDelete: () -> Unit,
-    onActionRestore: () -> Unit,
-    onActionCancel: () -> Unit
+    modifier: Modifier = Modifier
 ) {
-    if (selectedNotesCount > 0) {
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .width(280.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp, top = 24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onActionCancel) {
-                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.primary)
-                }
-                Text(
-                    text = "$selectedNotesCount Selected",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-            }
-
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                if (currentFolder == "Trash") {
-                    item { SideMenuItem(text = "Restore", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionRestore, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Restore) }
-                    item { SideMenuItem(text = "Delete Permanently", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionDelete, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DeleteForever) }
-                } else {
-                    item { SideMenuItem(text = "Move to...", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionMove, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DriveFileMove) }
-                    item { SideMenuItem(text = "Merge to PDF", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionExport, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.PictureAsPdf) }
-                    item { SideMenuItem(text = "Share", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionShare, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Share) }
-                    item { SideMenuItem(text = "Move to Trash", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onActionDelete, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Delete) }
-                }
-            }
-        }
-        return
-    }
-
     val tree = remember(folders) { buildFolderTree(folders) }
     var showDialog by remember { mutableStateOf(false) }
     var targetParentPath by remember { mutableStateOf<String?>(null) }
@@ -163,10 +114,10 @@ fun SideMenu(
     }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxHeight()
             .width(280.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            .background(MaterialTheme.colorScheme.surface)
             .padding(16.dp)
     ) {
         Row(
@@ -175,9 +126,12 @@ fun SideMenu(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text("Pixel Notes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 8.dp))
-            IconButton(onClick = { targetParentPath = null; showDialog = true }) {
-                Icon(Icons.Default.CreateNewFolder, contentDescription = "Add Root Folder", tint = MaterialTheme.colorScheme.primary)
-            }
+            ExpressiveIconButton(
+                icon = Icons.Default.CreateNewFolder,
+                contentDescription = "Add Root Folder",
+                onClick = { targetParentPath = null; showDialog = true },
+                contentColor = MaterialTheme.colorScheme.primary
+            )
         }
 
         LazyColumn(modifier = Modifier.weight(1f)) {
@@ -197,7 +151,13 @@ fun SideMenu(
             }
         }
 
-        SideMenuItem(text = "Settings", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onSettingsSelected, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Settings)
+        ExpressiveIconButton(
+            icon = Icons.Default.Settings,
+            contentDescription = "Settings",
+            onClick = onSettingsSelected,
+            modifier = Modifier.fillMaxWidth(),
+            size = 56.dp
+        )
     }
 }
 
@@ -242,7 +202,14 @@ private fun SideMenuItem(
             Spacer(modifier = Modifier.width(12.dp))
             Text(text, color = contentColor, style = MaterialTheme.typography.bodyLarge, fontWeight = if(isSelected) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f))
             if (onAddSubfolder != null && text != "All Notes") {
-                IconButton(onClick = onAddSubfolder, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Add, contentDescription = "Add Subfolder", tint = contentColor, modifier = Modifier.size(16.dp)) }
+                ExpressiveIconButton(
+                    icon = Icons.Default.Add,
+                    contentDescription = "Add Subfolder",
+                    onClick = onAddSubfolder,
+                    size = 32.dp,
+                    iconSize = 16.dp,
+                    contentColor = contentColor
+                )
             }
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {

@@ -1,33 +1,61 @@
 package com.midknight.pixelnotes.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AllOut
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.ManageAccounts
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
@@ -38,12 +66,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.FolderEntity
 import com.midknight.pixelnotes.data.NoteWithPages
+import com.midknight.pixelnotes.ui.components.ExpressiveButton
+import com.midknight.pixelnotes.ui.components.ExpressiveExtendedFAB
+import com.midknight.pixelnotes.ui.components.ExpressiveFAB
+import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
 import com.midknight.pixelnotes.ui.components.FolderCard
 import com.midknight.pixelnotes.ui.components.NoteCard
+import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,18 +93,33 @@ fun NotesScreen(
     folders: List<FolderEntity>,
     currentFolder: String,
     selectedNotes: List<NoteWithPages>,
+    userEmail: String?,
+    userName: String?,
+    userPhotoUri: String?,
     onNoteClick: (NoteWithPages) -> Unit,
     onNoteLongClick: (NoteWithPages) -> Unit,
     onCreateNewNote: (Boolean) -> Unit,
     onFolderSelected: (String) -> Unit,
     onRenameFolder: (String, String) -> Unit,
-    onDeleteFolder: (String) -> Unit
+    onDeleteFolder: (String) -> Unit,
+    onMenuClick: () -> Unit,
+    onClearSelection: () -> Unit,
+    onActionMove: () -> Unit,
+    onActionExport: () -> Unit,
+    onActionShare: () -> Unit,
+    onActionDelete: () -> Unit,
+    onActionRestore: () -> Unit,
+    onSignInClick: () -> Unit,
+    onSignOutClick: () -> Unit,
+    viewModel: NotesViewModel
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
     var newFolderName by remember { mutableStateOf("") }
     var showFabMenu by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     if (folderToDelete != null) {
         AlertDialog(
@@ -82,6 +138,20 @@ fun NotesScreen(
             text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, label = { Text("New Name") }) },
             confirmButton = { TextButton(onClick = { if (newFolderName.isNotBlank()) folderToRename?.let { onRenameFolder(it.path, newFolderName) }; folderToRename = null }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { folderToRename = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (showProfileDialog) {
+        ProfileDialog(
+            userEmail = userEmail,
+            userName = userName,
+            userPhotoUri = userPhotoUri,
+            isSyncing = viewModel.isSyncing,
+            onDismiss = { showProfileDialog = false },
+            onSignOut = { onSignOutClick(); showProfileDialog = false },
+            onSignIn = { onSignInClick(); showProfileDialog = false },
+            onBackup = { viewModel.backupToCloud(context) },
+            onRestore = { viewModel.restoreFromCloud(context) }
         )
     }
 
@@ -105,42 +175,120 @@ fun NotesScreen(
                 Column(horizontalAlignment = Alignment.End) {
                     AnimatedVisibility(visible = showFabMenu) {
                         Column(modifier = Modifier.padding(bottom = 16.dp), horizontalAlignment = Alignment.End) {
-                            ExtendedFloatingActionButton(
-                                text = { Text("A4 Note") },
-                                icon = { Icon(Icons.Default.Description, contentDescription = null) },
+                            ExpressiveIconButton(
+                                icon = Icons.Default.Description,
+                                contentDescription = "A4 Note",
                                 onClick = { showFabMenu = false; onCreateNewNote(false) },
                                 modifier = Modifier.padding(bottom = 8.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                isSemiSquared = true,
+                                size = 56.dp
                             )
-                            ExtendedFloatingActionButton(
-                                text = { Text("Infinite Canvas") },
-                                icon = { Icon(Icons.Default.AllOut, contentDescription = null) },
+                            ExpressiveIconButton(
+                                icon = Icons.Default.AllOut,
+                                contentDescription = "Infinite Canvas",
                                 onClick = { showFabMenu = false; onCreateNewNote(true) },
                                 modifier = Modifier.padding(bottom = 8.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                isSemiSquared = true,
+                                size = 56.dp
                             )
                         }
                     }
-                    FloatingActionButton(
+                    ExpressiveFAB(
+                        icon = if (showFabMenu) Icons.Default.Close else Icons.Default.Add,
                         onClick = { showFabMenu = !showFabMenu },
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
-                    ) {
-                        Icon(if (showFabMenu) Icons.Default.Close else Icons.Default.Add, contentDescription = "New Note")
-                    }
+                    )
                 }
             }
         }
     ) { paddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            OutlinedTextField(
-                value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Search in $currentFolder...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                trailingIcon = { if (searchQuery.isNotEmpty()) { IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") } } },
-                shape = RoundedCornerShape(32.dp),
-                colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+            Box(modifier = Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                // NORMAL TOP BAR
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selectedNotes.isEmpty(),
+                    enter = fadeIn(tween(300)),
+                    exit = fadeOut(tween(300))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ExpressiveIconButton(
+                            icon = Icons.Default.Menu,
+                            contentDescription = "Menu",
+                            onClick = onMenuClick
+                        )
+                        
+                        OutlinedTextField(
+                            value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Search in $currentFolder...") },
+                            trailingIcon = { if (searchQuery.isNotEmpty()) { ExpressiveIconButton(icon = Icons.Default.Clear, contentDescription = "Clear search", onClick = { searchQuery = "" }, size = 32.dp, iconSize = 18.dp) } },
+                            shape = RoundedCornerShape(32.dp),
+                            colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .clickable { showProfileDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (userPhotoUri != null) {
+                                AsyncImage(
+                                    model = userPhotoUri,
+                                    contentDescription = "Profile",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(Icons.Default.Person, contentDescription = "Profile", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
+                    }
+                }
+
+                // CONTEXTUAL SELECTION BAR
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selectedNotes.isNotEmpty(),
+                    enter = fadeIn(tween(300)),
+                    exit = fadeOut(tween(300))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ExpressiveIconButton(
+                            icon = Icons.Default.Close,
+                            contentDescription = "Clear Selection",
+                            onClick = onClearSelection,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "${selectedNotes.size} selected",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(start = 8.dp).weight(1f)
+                        )
+                        
+                        if (currentFolder == "Trash") {
+                            ExpressiveIconButton(icon = Icons.Default.Restore, contentDescription = "Restore", onClick = onActionRestore, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.DeleteForever, contentDescription = "Delete Permanently", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                        } else {
+                            ExpressiveIconButton(icon = Icons.Default.DriveFileMove, contentDescription = "Move", onClick = onActionMove, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.PictureAsPdf, contentDescription = "Merge PDF", onClick = onActionExport, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.Share, contentDescription = "Share", onClick = onActionShare, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.Delete, contentDescription = "Trash", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    }
+                }
+            }
 
             if (displayedFolders.isEmpty() && displayedNotes.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -169,5 +317,148 @@ fun NotesScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ProfileDialog(
+    userEmail: String?,
+    userName: String?,
+    userPhotoUri: String?,
+    isSyncing: Boolean,
+    onDismiss: () -> Unit,
+    onSignOut: () -> Unit,
+    onSignIn: () -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit
+) {
+    var localIsRestoring by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .width(350.dp)
+                .clip(RoundedCornerShape(28.dp)),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Header
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    ExpressiveIconButton(
+                        icon = Icons.Default.Close,
+                        contentDescription = "Close",
+                        onClick = onDismiss,
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    )
+                    Text(
+                        text = userEmail ?: "Not signed in",
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Profile Image with Camera overlay
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (userPhotoUri != null) {
+                            AsyncImage(
+                                model = userPhotoUri,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                            .padding(4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(12.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = if (userName != null) "Hi, $userName!" else "Welcome to Pixel Notes",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Action List
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest
+                ) {
+                    Column {
+                        if (userEmail == null) {
+                            ProfileDialogRow(icon = Icons.Default.GroupAdd, text = "Sign in to Pixel Notes", onClick = onSignIn)
+                        } else {
+                            ProfileDialogRow(
+                                icon = Icons.Default.Backup, 
+                                text = if (isSyncing && !localIsRestoring) "Backing up..." else "Backup Now", 
+                                onClick = { onBackup() }
+                            )
+                            ProfileDialogRow(
+                                icon = Icons.Default.CloudDownload, 
+                                text = if (localIsRestoring) "Restoring..." else "Restore from Cloud", 
+                                onClick = { localIsRestoring = true; onRestore() }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                            ProfileDialogRow(icon = Icons.Default.Logout, text = "Sign out", onClick = onSignOut)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileDialogRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ExpressiveIconButton(
+            icon = icon,
+            contentDescription = null,
+            onClick = onClick,
+            size = 32.dp,
+            iconSize = 20.dp,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge)
     }
 }

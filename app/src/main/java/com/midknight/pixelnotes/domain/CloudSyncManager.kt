@@ -80,23 +80,46 @@ class CloudSyncManager(private val context: Context) {
                 .build()
 
             val query = "name = '$backupFileName' and 'appDataFolder' in parents and trashed = false"
-            val files = drive.files().list().setSpaces("appDataFolder").setQ(query).execute().files
+            val filesList = drive.files().list().setSpaces("appDataFolder").setQ(query).execute()
+            val files = filesList.files
 
             if (files.isNullOrEmpty()) {
+                Log.w(TAG, "Restore failed: No backup found on cloud for $accountName")
                 return@withContext Result.failure(Exception("No backup found on Google Drive"))
             }
 
+            Log.d(TAG, "Backup found: ${files[0].id}. Downloading...")
             val tempZip = File(context.cacheDir, "restore_temp.zip")
             FileOutputStream(tempZip).use { output ->
                 drive.files().get(files[0].id).executeMediaAndDownloadTo(output)
             }
 
+            Log.d(TAG, "Download complete. ZIP size: ${tempZip.length()} bytes. Extracting...")
             extractBackupZip(tempZip)
             tempZip.delete()
+            
+            Log.d(TAG, "Restore successful for $accountName")
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "Restore failed", e)
+            Log.e(TAG, "Restore failed for $accountName", e)
             Result.failure(e)
+        }
+    }
+
+    fun clearLocalData() {
+        try {
+            com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
+            val dbFile = context.getDatabasePath("pixel_notes_database")
+            if (dbFile.exists()) dbFile.delete()
+            File(dbFile.path + "-shm").delete()
+            File(dbFile.path + "-wal").delete()
+
+            listOf("audio_notes", "custom_fonts", "imported_pdfs").forEach { dir ->
+                File(context.filesDir, dir).deleteRecursively()
+            }
+            Log.d(TAG, "Local data cleared successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear local data", e)
         }
     }
 
@@ -135,27 +158,47 @@ class CloudSyncManager(private val context: Context) {
     }
 
     private fun extractBackupZip(zipFile: File) {
-        listOf("audio_notes", "custom_fonts", "imported_pdfs").forEach { dir ->
-            File(context.filesDir, dir).deleteRecursively()
+        Log.d(TAG, "Starting extraction of ZIP: ${zipFile.absolutePath}")
+        
+        // 1. CLEAR CURRENT DATABASE FILES FIRST
+        // This is critical to prevent SQLite from recovering from old WAL/SHM files
+        val dbFile = context.getDatabasePath("pixel_notes_database")
+        if (dbFile.exists()) dbFile.delete()
+        File(dbFile.path + "-shm").delete()
+        File(dbFile.path + "-wal").delete()
+
+        // 2. CLEAR CURRENT MEDIA FOLDERS
+        listOf("audio_notes", "custom_fonts", "imported_pdfs").forEach { 
+            val dir = File(context.filesDir, it)
+            if (dir.exists()) {
+                val deleted = dir.deleteRecursively()
+                Log.d(TAG, "Deleting local dir $it: $deleted")
+            }
         }
 
         ZipInputStream(FileInputStream(zipFile)).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
+                Log.d(TAG, "Extracting entry: ${entry.name}")
                 val destFile = if (entry.name.startsWith("database/")) {
-                    File(context.getDatabasePath("pixel_notes_database").parentFile, entry.name.removePrefix("database/"))
+                    val dbName = entry.name.removePrefix("database/")
+                    File(context.getDatabasePath("pixel_notes_database").parentFile, dbName)
                 } else if (entry.name.startsWith("files/")) {
                     File(context.filesDir, entry.name.removePrefix("files/"))
                 } else {
                     null
                 }
+
                 destFile?.let {
                     it.parentFile?.mkdirs()
                     FileOutputStream(it).use { out -> zis.copyTo(out) }
+                    Log.d(TAG, "Written to: ${it.absolutePath} (${it.length()} bytes)")
                 }
+                
                 zis.closeEntry()
                 entry = zis.nextEntry
             }
         }
+        Log.d(TAG, "Extraction finished")
     }
 }

@@ -13,8 +13,8 @@ android {
         applicationId = "com.midknight.pixelnotes"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.2.0-beta"
+        versionCode = 8
+        versionName = "1.3.0-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -71,6 +71,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
     implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("androidx.graphics:graphics-shapes:1.1.0")
 
     implementation("com.google.apis:google-api-services-drive:v3-rev20241027-2.0.0")
     implementation("com.google.api-client:google-api-client-android:2.9.0")

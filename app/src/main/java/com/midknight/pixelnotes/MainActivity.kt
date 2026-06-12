@@ -16,15 +16,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,12 +35,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.midknight.pixelnotes.data.NoteDatabase
 import com.midknight.pixelnotes.domain.PdfExporter
+import com.midknight.pixelnotes.ui.components.ExpressiveButton
 import com.midknight.pixelnotes.ui.components.SideMenu
 import com.midknight.pixelnotes.ui.screens.DrawingScreen
 import com.midknight.pixelnotes.ui.screens.NotesScreen
@@ -64,6 +70,8 @@ class MainActivity : ComponentActivity() {
                 val folders by viewModel.folders.collectAsState()
                 val context = LocalContext.current
                 val coroutineScope = rememberCoroutineScope()
+                
+                val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
                 val pdfLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
                     uri?.let {
@@ -76,8 +84,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                BackHandler(enabled = viewModel.currentScreen != 0 || viewModel.selectedNotes.isNotEmpty()) {
-                    if (viewModel.selectedNotes.isNotEmpty()) {
+                BackHandler(enabled = viewModel.currentScreen != 0 || viewModel.selectedNotes.isNotEmpty() || drawerState.isOpen) {
+                    if (drawerState.isOpen) {
+                        coroutineScope.launch { drawerState.close() }
+                    } else if (viewModel.selectedNotes.isNotEmpty()) {
                         viewModel.clearSelection()
                     } else if (viewModel.currentScreen == 1) {
                         if (!viewModel.isNoteBlank()) Toast.makeText(context, "Note saved", Toast.LENGTH_SHORT).show()
@@ -93,8 +103,22 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = { viewModel.showDeleteDialog = false },
                         title = { Text(if (isTrash) "Delete Permanently" else "Move to Trash") },
                         text = { Text(if (isTrash) "These ${viewModel.selectedNotes.size} notes will be deleted forever." else "Move ${viewModel.selectedNotes.size} notes to the trash?") },
-                        confirmButton = { TextButton(onClick = { if (isTrash) viewModel.permanentlyDeleteSelected() else viewModel.moveToTrash(); viewModel.showDeleteDialog = false }) { Text(if (isTrash) "Delete" else "Move", color = MaterialTheme.colorScheme.error) } },
-                        dismissButton = { TextButton(onClick = { viewModel.showDeleteDialog = false }) { Text("Cancel") } }
+                        confirmButton = { 
+                            ExpressiveButton(
+                                text = if (isTrash) "Delete" else "Move", 
+                                onClick = { if (isTrash) viewModel.permanentlyDeleteSelected() else viewModel.moveToTrash(); viewModel.showDeleteDialog = false },
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
+                        },
+                        dismissButton = { 
+                            ExpressiveButton(
+                                text = "Cancel", 
+                                onClick = { viewModel.showDeleteDialog = false },
+                                containerColor = Color.Transparent,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     )
                 }
 
@@ -118,8 +142,20 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         },
-                        confirmButton = { TextButton(onClick = { viewModel.moveSelectedNotes(selectedFolder); viewModel.showMoveDialog = false }) { Text("Move") } },
-                        dismissButton = { TextButton(onClick = { viewModel.showMoveDialog = false }) { Text("Cancel") } }
+                        confirmButton = { 
+                            ExpressiveButton(
+                                text = "Move", 
+                                onClick = { viewModel.moveSelectedNotes(selectedFolder); viewModel.showMoveDialog = false }
+                            )
+                        },
+                        dismissButton = { 
+                            ExpressiveButton(
+                                text = "Cancel", 
+                                onClick = { viewModel.showMoveDialog = false },
+                                containerColor = Color.Transparent,
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     )
                 }
 
@@ -129,81 +165,131 @@ class MainActivity : ComponentActivity() {
                         title = { Text("Share Notes") },
                         text = { Text("How would you like to share ${viewModel.selectedNotes.size} notes?") },
                         confirmButton = {
-                            TextButton(onClick = {
-                                viewModel.showShareDialog = false
-                                coroutineScope.launch {
-                                    val exporter = PdfExporter(context)
-                                    val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "PixelNotes_Merged.pdf")
-                                    file?.let {
-                                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
-                                        val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                                        context.startActivity(Intent.createChooser(shareIntent, "Share Merged Notes"))
+                            ExpressiveButton(
+                                text = "Merge as 1 PDF",
+                                onClick = {
+                                    viewModel.showShareDialog = false
+                                    coroutineScope.launch {
+                                        val exporter = PdfExporter(context)
+                                        val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "PixelNotes_Merged.pdf")
+                                        file?.let {
+                                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                                            context.startActivity(Intent.createChooser(shareIntent, "Share Merged Notes"))
+                                        }
+                                        viewModel.clearSelection()
                                     }
-                                    viewModel.clearSelection()
                                 }
-                            }) { Text("Merge as 1 PDF") }
+                            )
                         },
                         dismissButton = {
-                            TextButton(onClick = {
-                                viewModel.showShareDialog = false
-                                coroutineScope.launch {
-                                    val exporter = PdfExporter(context)
-                                    val files = exporter.exportToSharedFiles(viewModel.selectedNotes.toList())
-                                    val uris = ArrayList<Uri>(files.map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) })
-                                    val shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply { type = "application/pdf"; putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                                    context.startActivity(Intent.createChooser(shareIntent, "Share Separate PDFs"))
-                                    viewModel.clearSelection()
-                                }
-                            }) { Text("Separate PDFs") }
+                            ExpressiveButton(
+                                text = "Separate PDFs",
+                                onClick = {
+                                    viewModel.showShareDialog = false
+                                    coroutineScope.launch {
+                                        val exporter = PdfExporter(context)
+                                        val files = exporter.exportToSharedFiles(viewModel.selectedNotes.toList())
+                                        val uris = ArrayList<Uri>(files.map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) })
+                                        val shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply { type = "application/pdf"; putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share Separate PDFs"))
+                                        viewModel.clearSelection()
+                                    }
+                                },
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
                         }
                     )
                 }
 
-                Surface(modifier = Modifier.fillMaxSize().systemBarsPadding(), color = MaterialTheme.colorScheme.background) {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        if (viewModel.currentScreen != 1) {
-                            SideMenu(
-                                currentFolder = viewModel.currentFolderFilter,
-                                folders = folders,
-                                selectedNotesCount = viewModel.selectedNotes.size,
-                                onFolderSelected = { folder -> viewModel.currentFolderFilter = folder; viewModel.currentScreen = 0 },
-                                onSettingsSelected = { viewModel.currentScreen = 2 },
-                                onCreateFolder = { name, parent -> viewModel.createFolder(name, parent) },
-                                onRenameFolder = { oldPath, newName -> viewModel.renameFolder(oldPath, newName) },
-                                onDeleteFolder = { path -> viewModel.deleteFolder(path) },
-                                onActionMove = { viewModel.showMoveDialog = true },
-                                onActionExport = {
-                                    val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
-                                    pdfLauncher.launch("PixelNotes_Merged_$currentDate.pdf")
-                                },
-                                onActionShare = { if(viewModel.selectedNotes.size == 1) {
-                                    coroutineScope.launch {
-                                        val exporter = PdfExporter(context)
-                                        val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "${viewModel.selectedNotes.first().note.title}.pdf")
-                                        file?.let {
-                                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
-                                            val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                                            context.startActivity(Intent.createChooser(shareIntent, "Share Note"))
-                                        }
-                                        viewModel.clearSelection()
-                                    }
-                                } else viewModel.showShareDialog = true },
-                                onActionDelete = { viewModel.showDeleteDialog = true },
-                                onActionRestore = { viewModel.restoreFromTrash() },
-                                onActionCancel = { viewModel.clearSelection() }
-                            )
-                        }
+                val syncLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) { result ->
+                    if (result.resultCode == RESULT_OK) {
+                        viewModel.backupToCloud(context)
+                    }
+                }
 
-                        Surface(modifier = Modifier.weight(1f)) {
+                androidx.compose.runtime.LaunchedEffect(viewModel.pendingSyncIntent) {
+                    viewModel.pendingSyncIntent?.let { intent ->
+                        syncLauncher.launch(intent)
+                        viewModel.pendingSyncIntent = null
+                    }
+                }
+
+                if (viewModel.isSyncing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(100f)
+                    ) {
+                        com.midknight.pixelnotes.ui.components.MorphingLoader()
+                    }
+                }
+
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        SideMenu(
+                            currentFolder = viewModel.currentFolderFilter,
+                            folders = folders,
+                            onFolderSelected = { folder ->
+                                viewModel.currentFolderFilter = folder
+                                viewModel.currentScreen = 0
+                                coroutineScope.launch { drawerState.close() }
+                            },
+                            onSettingsSelected = {
+                                viewModel.currentScreen = 2
+                                coroutineScope.launch { drawerState.close() }
+                            },
+                            onCreateFolder = { name, parent -> viewModel.createFolder(name, parent) },
+                            onRenameFolder = { oldPath, newName -> viewModel.renameFolder(oldPath, newName) },
+                            onDeleteFolder = { path -> viewModel.deleteFolder(path) }
+                        )
+                    },
+                    gesturesEnabled = viewModel.currentScreen == 0 && viewModel.selectedNotes.isEmpty()
+                ) {
+                    Surface(modifier = Modifier.fillMaxSize().systemBarsPadding(), color = MaterialTheme.colorScheme.background) {
+                        Surface(modifier = Modifier.fillMaxSize()) {
                             when (viewModel.currentScreen) {
                                 0 -> NotesScreen(
                                     notes = notes, folders = folders, currentFolder = viewModel.currentFolderFilter, selectedNotes = viewModel.selectedNotes,
+                                    userEmail = viewModel.userEmail,
+                                    userName = viewModel.userName,
+                                    userPhotoUri = viewModel.userPhotoUri,
                                     onNoteClick = { noteWP -> viewModel.openNoteForEditing(noteWP) },
                                     onNoteLongClick = { noteWP -> viewModel.toggleSelection(noteWP) },
                                     onCreateNewNote = { isInfinite -> viewModel.openNoteForEditing(null, isInfinite) },
                                     onFolderSelected = { folderPath -> viewModel.currentFolderFilter = folderPath },
                                     onRenameFolder = { oldPath, newName -> viewModel.renameFolder(oldPath, newName) },
-                                    onDeleteFolder = { path -> viewModel.deleteFolder(path) }
+                                    onDeleteFolder = { path -> viewModel.deleteFolder(path) },
+                                    onMenuClick = { coroutineScope.launch { drawerState.open() } },
+                                    onClearSelection = { viewModel.clearSelection() },
+                                    onActionMove = { viewModel.showMoveDialog = true },
+                                    onActionExport = {
+                                        val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
+                                        pdfLauncher.launch("PixelNotes_Merged_$currentDate.pdf")
+                                    },
+                                    onActionShare = {
+                                        if (viewModel.selectedNotes.size == 1) {
+                                            coroutineScope.launch {
+                                                val exporter = PdfExporter(context)
+                                                val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "${viewModel.selectedNotes.first().note.title}.pdf")
+                                                file?.let {
+                                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
+                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                                                    context.startActivity(Intent.createChooser(shareIntent, "Share Note"))
+                                                }
+                                                viewModel.clearSelection()
+                                            }
+                                        } else viewModel.showShareDialog = true
+                                    },
+                                    onActionDelete = { viewModel.showDeleteDialog = true },
+                                    onActionRestore = { viewModel.restoreFromTrash() },
+                                    onSignInClick = { viewModel.signIn(context) },
+                                    onSignOutClick = { viewModel.signOut(context) },
+                                    viewModel = viewModel
                                 )
                                 1 -> DrawingScreen(viewModel = viewModel)
                                 2 -> SettingsScreen(viewModel = viewModel)
