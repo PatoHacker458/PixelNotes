@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.ExpandMore
@@ -126,8 +127,50 @@ fun NotesScreen(
             onDismissRequest = { folderToDelete = null },
             title = { Text("Delete Folder") },
             text = { Text("Delete '${folderToDelete?.name}' and all its contents?") },
-            confirmButton = { TextButton(onClick = { folderToDelete?.let { onDeleteFolder(it.path) }; folderToDelete = null }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
-            dismissButton = { TextButton(onClick = { folderToDelete = null }) { Text("Cancel") } }
+            confirmButton = { 
+                ExpressiveButton(
+                    text = "Delete", 
+                    onClick = { folderToDelete?.let { onDeleteFolder(it.path) }; folderToDelete = null },
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                    isSquareEdge = true
+                )
+            },
+            dismissButton = { 
+                ExpressiveButton(
+                    text = "Cancel", 
+                    onClick = { folderToDelete = null },
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    isSquareEdge = true
+                )
+            }
+        )
+    }
+
+    if (viewModel.showEmptyTrashDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.showEmptyTrashDialog = false },
+            title = { Text("Empty Trash") },
+            text = { Text("Permanently delete all notes in the trash? This cannot be undone.") },
+            confirmButton = {
+                ExpressiveButton(
+                    text = "Empty Trash",
+                    onClick = { viewModel.emptyTrash() },
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                    isSquareEdge = true
+                )
+            },
+            dismissButton = {
+                ExpressiveButton(
+                    text = "Cancel",
+                    onClick = { viewModel.showEmptyTrashDialog = false },
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    isSquareEdge = true
+                )
+            }
         )
     }
 
@@ -171,7 +214,14 @@ fun NotesScreen(
 
     Scaffold(
         floatingActionButton = {
-            if (selectedNotes.isEmpty() && currentFolder != "Trash") {
+            if (currentFolder == "Trash") {
+                ExpressiveFAB(
+                    icon = Icons.Default.DeleteSweep,
+                    onClick = { viewModel.showEmptyTrashDialog = true },
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                )
+            } else if (selectedNotes.isEmpty()) {
                 Column(horizontalAlignment = Alignment.End) {
                     AnimatedVisibility(visible = showFabMenu) {
                         Column(modifier = Modifier.padding(bottom = 16.dp), horizontalAlignment = Alignment.End) {
@@ -181,7 +231,6 @@ fun NotesScreen(
                                 onClick = { showFabMenu = false; onCreateNewNote(false) },
                                 modifier = Modifier.padding(bottom = 8.dp),
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                isSemiSquared = true,
                                 size = 56.dp
                             )
                             ExpressiveIconButton(
@@ -190,7 +239,6 @@ fun NotesScreen(
                                 onClick = { showFabMenu = false; onCreateNewNote(true) },
                                 modifier = Modifier.padding(bottom = 8.dp),
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                isSemiSquared = true,
                                 size = 56.dp
                             )
                         }

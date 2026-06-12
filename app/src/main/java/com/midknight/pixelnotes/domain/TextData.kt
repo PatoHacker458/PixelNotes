@@ -7,5 +7,6 @@ data class TextData(
     var text: String,
     var colorArgb: Int,
     var fontSize: Float,
-    var fontName: String
+    var fontName: String,
+    var maxWidth: Float = 800f
 )

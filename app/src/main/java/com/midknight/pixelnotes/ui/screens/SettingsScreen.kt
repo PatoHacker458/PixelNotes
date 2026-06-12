@@ -132,15 +132,6 @@ fun SettingsScreen(viewModel: NotesViewModel) {
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { fontPickerLauncher.launch("*/*") },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Icon(Icons.Filled.FontDownload, contentDescription = "Import Font")
-            }
         }
     ) { paddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
@@ -181,18 +172,39 @@ fun SettingsScreen(viewModel: NotesViewModel) {
 
             // --- FONTS MANAGER ---
             Text(
-                text = "Installed Custom Fonts",
+                text = "Custom Fonts",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(16.dp),
                 color = MaterialTheme.colorScheme.primary
             )
 
-            if (customFonts.isEmpty()) {
-                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("No custom fonts installed yet.\n\nTap the button below to import your own .ttf or .otf files.", color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)).padding(16.dp)) {
+                Column {
+                    Text("Install New Font", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Import your own .ttf or .otf files to use them in your text notes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = { fontPickerLauncher.launch("*/*") },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Filled.FontDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Install Custom Font")
+                    }
                 }
-            } else {
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (customFonts.isNotEmpty()) {
+                Text(
+                    text = "Installed Fonts",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.outline
+                )
                 LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(customFonts) { font ->
                         Row(

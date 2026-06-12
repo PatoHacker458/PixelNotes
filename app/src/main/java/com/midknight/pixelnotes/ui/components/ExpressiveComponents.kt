@@ -1,5 +1,6 @@
 package com.midknight.pixelnotes.ui.components
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,9 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -40,28 +42,32 @@ import androidx.graphics.shapes.circle
 import androidx.graphics.shapes.star
 import androidx.graphics.shapes.toPath
 
+// 1. MorphPolygonShape limpio: Solo para botones 1:1 (Iconos y FABs circulares)
 class MorphPolygonShape(
     private val morph: Morph,
-    private val percentage: Float,
-    private val rotation: Float = 0f
+    private val percentage: Float
 ) : Shape {
-    private val matrix = Matrix()
-
     override fun createOutline(
         size: Size,
         layoutDirection: LayoutDirection,
         density: Density
     ): Outline {
         val path = morph.toPath(percentage).asComposePath()
-        matrix.reset()
-        matrix.translate(size.width / 2f, size.height / 2f)
-        matrix.scale(size.width / 2f, size.height / 2f)
-        matrix.rotateZ(rotation)
-        path.transform(matrix)
-        return Outline.Generic(path)
+        val matrix = android.graphics.Matrix()
+
+        // Escala simétrica basada en el lado más corto para no deformar
+        val scale = minOf(size.width, size.height) / 2f
+        matrix.postScale(scale, scale)
+        matrix.postTranslate(size.width / 2f, size.height / 2f)
+
+        val androidPath = path.asAndroidPath()
+        androidPath.transform(matrix)
+
+        return Outline.Generic(androidPath.asComposePath())
     }
 }
 
+// 2. Botones cuadrados (Usan la figura polígonal perfecta)
 @Composable
 fun ExpressiveIconButton(
     icon: ImageVector,
@@ -71,17 +77,10 @@ fun ExpressiveIconButton(
     containerColor: Color = Color.Transparent,
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     size: Dp = 48.dp,
-    iconSize: Dp = 24.dp,
-    isSemiSquared: Boolean = false
+    iconSize: Dp = 24.dp
 ) {
-    val shapeA = remember { 
-        if (isSemiSquared) RoundedPolygon(numVertices = 4, rounding = CornerRounding(0.3f)) 
-        else RoundedPolygon.circle(numVertices = 8) 
-    }
-    val shapeB = remember { 
-        if (isSemiSquared) RoundedPolygon(numVertices = 4, rounding = CornerRounding(0.1f)) 
-        else RoundedPolygon.star(numVerticesPerRadius = 8, innerRadius = 0.85f, rounding = CornerRounding(0.2f)) 
-    }
+    val shapeA = remember { RoundedPolygon.circle() }
+    val shapeB = remember { RoundedPolygon.star(numVerticesPerRadius = 8, innerRadius = 0.75f, rounding = CornerRounding(0.2f)) }
     val morph = remember { Morph(shapeA, shapeB) }
 
     val interactionSource = remember { MutableInteractionSource() }
@@ -89,20 +88,14 @@ fun ExpressiveIconButton(
 
     val progress by animateFloatAsState(
         targetValue = if (isPressed) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.5f, stiffness = 300f),
-        label = "morph"
-    )
-    
-    val rotation by animateFloatAsState(
-        targetValue = if (isSemiSquared && isPressed) 0f else if (isSemiSquared) 45f else 0f,
-        animationSpec = spring(dampingRatio = 0.5f, stiffness = 300f),
-        label = "rot"
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f),
+        label = "iconMorph"
     )
 
     Box(
         modifier = modifier
             .size(size)
-            .clip(MorphPolygonShape(morph, progress, rotation))
+            .clip(MorphPolygonShape(morph, progress))
             .background(containerColor)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center
@@ -124,8 +117,8 @@ fun ExpressiveFAB(
     containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
     contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
 ) {
-    val shapeA = remember { RoundedPolygon(numVertices = 4, rounding = CornerRounding(0.3f)) } // Square (when rotated)
-    val shapeB = remember { RoundedPolygon(numVertices = 4, rounding = CornerRounding(0.05f)) } // Sharp Rhomboid
+    val shapeA = remember { RoundedPolygon.circle() }
+    val shapeB = remember { RoundedPolygon.star(numVerticesPerRadius = 12, innerRadius = 0.85f, rounding = CornerRounding(0.2f)) }
     val morph = remember { Morph(shapeA, shapeB) }
 
     val interactionSource = remember { MutableInteractionSource() }
@@ -136,17 +129,11 @@ fun ExpressiveFAB(
         animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f),
         label = "fabMorph"
     )
-    
-    val rotation by animateFloatAsState(
-        targetValue = if (isPressed) 0f else 45f,
-        animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f),
-        label = "fabRot"
-    )
 
     Box(
         modifier = modifier
             .size(56.dp)
-            .clip(MorphPolygonShape(morph, progress, rotation))
+            .clip(MorphPolygonShape(morph, progress))
             .background(containerColor)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center
@@ -160,6 +147,7 @@ fun ExpressiveFAB(
     }
 }
 
+// 3. Botones Rectangulares (Arreglados con RoundedCornerShape nativo)
 @Composable
 fun ExpressiveExtendedFAB(
     icon: ImageVector,
@@ -169,25 +157,22 @@ fun ExpressiveExtendedFAB(
     containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
     contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer
 ) {
-    val shapeA = remember { RoundedPolygon(numVertices = 4, rounding = CornerRounding(0.3f)) }
-    val shapeB = remember { RoundedPolygon.star(numVerticesPerRadius = 4, innerRadius = 0.92f, rounding = CornerRounding(0.2f)) }
-    val morph = remember { Morph(shapeA, shapeB) }
-
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    val progress by animateFloatAsState(
-        targetValue = if (isPressed) 1f else 0f,
+    // Animamos los DP de las esquinas en lugar de un polígono
+    val cornerRadius by animateDpAsState(
+        targetValue = if (isPressed) 8.dp else 28.dp,
         animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f),
-        label = "extFabMorph"
+        label = "extFabCorner"
     )
 
     Box(
         modifier = modifier
-            .clip(MorphPolygonShape(morph, progress))
+            .clip(RoundedCornerShape(cornerRadius))
             .background(containerColor)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -214,24 +199,25 @@ fun ExpressiveButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.primary,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimary
+    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
+    isSquareEdge: Boolean = false
 ) {
-    val shapeA = remember { RoundedPolygon(numVertices = 4, rounding = CornerRounding(0.3f)) }
-    val shapeB = remember { RoundedPolygon.star(numVerticesPerRadius = 4, innerRadius = 0.95f, rounding = CornerRounding(0.2f)) }
-    val morph = remember { Morph(shapeA, shapeB) }
-
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    val progress by animateFloatAsState(
-        targetValue = if (isPressed) 1f else 0f,
+    // Ajuste dinámico de esquinas para mantener la estética limpia
+    val defaultRadius = if (isSquareEdge) 8.dp else 24.dp
+    val pressedRadius = if (isSquareEdge) 24.dp else 8.dp
+
+    val cornerRadius by animateDpAsState(
+        targetValue = if (isPressed) pressedRadius else defaultRadius,
         animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f),
-        label = "btnMorph"
+        label = "btnCorner"
     )
 
     Box(
         modifier = modifier
-            .clip(MorphPolygonShape(morph, progress))
+            .clip(RoundedCornerShape(cornerRadius))
             .background(containerColor)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 12.dp),

@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -118,6 +120,8 @@ fun SideMenu(
             .fillMaxHeight()
             .width(280.dp)
             .background(MaterialTheme.colorScheme.surface)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .padding(16.dp)
     ) {
         Row(
@@ -149,15 +153,10 @@ fun SideMenu(
             item {
                 SideMenuItem(text = "Trash", isSelected = currentFolder == "Trash", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { onFolderSelected("Trash") }, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DeleteSweep)
             }
+            item {
+                SideMenuItem(text = "Settings", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onSettingsSelected, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Settings)
+            }
         }
-
-        ExpressiveIconButton(
-            icon = Icons.Default.Settings,
-            contentDescription = "Settings",
-            onClick = onSettingsSelected,
-            modifier = Modifier.fillMaxWidth(),
-            size = 56.dp
-        )
     }
 }
 

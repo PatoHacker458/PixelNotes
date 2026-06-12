@@ -6,12 +6,14 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -50,8 +52,28 @@ fun getSelectionBounds(strokes: List<StrokeData>, texts: List<TextData>, images:
     var maxX = Float.MIN_VALUE; var maxY = Float.MIN_VALUE
 
     strokes.forEach { stroke -> val b = stroke.getBounds(); if (b.left < minX) minX = b.left; if (b.top < minY) minY = b.top; if (b.right > maxX) maxX = b.right; if (b.bottom > maxY) maxY = b.bottom }
-    val paint = android.graphics.Paint()
-    texts.forEach { textData -> paint.textSize = textData.fontSize; val width = paint.measureText(textData.text); if (textData.x < minX) minX = textData.x; if (textData.y - textData.fontSize < minY) minY = textData.y - textData.fontSize; if (textData.x + width > maxX) maxX = textData.x + width; if (textData.y > maxY) maxY = textData.y }
+    val textPaint = android.text.TextPaint()
+    texts.forEach { textData ->
+        textPaint.textSize = textData.fontSize
+        val width = textData.maxWidth.toInt().coerceAtLeast(1)
+        val layout = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            android.text.StaticLayout.Builder.obtain(textData.text, 0, textData.text.length, textPaint, width)
+                .setAlignment(android.text.Layout.Alignment.ALIGN_NORMAL)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            android.text.StaticLayout(textData.text, textPaint, width, android.text.Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false)
+        }
+        val textHeight = layout.height.toFloat()
+        var actualMaxWidth = 0f
+        for (i in 0 until layout.lineCount) {
+            actualMaxWidth = maxOf(actualMaxWidth, layout.getLineWidth(i))
+        }
+        if (textData.x < minX) minX = textData.x
+        if (textData.y < minY) minY = textData.y
+        if (textData.x + actualMaxWidth > maxX) maxX = textData.x + actualMaxWidth
+        if (textData.y + textHeight > maxY) maxY = textData.y + textHeight
+    }
     images.forEach { img -> if (img.x < minX) minX = img.x; if (img.y < minY) minY = img.y; if (img.x + img.width > maxX) maxX = img.x + img.width; if (img.y + img.height > maxY) maxY = img.y + img.height }
 
     return if (minX == Float.MAX_VALUE) Rect(0f, 0f, 1920f, 1080f) else Rect(minX, minY, maxX, maxY)
@@ -60,11 +82,13 @@ fun getSelectionBounds(strokes: List<StrokeData>, texts: List<TextData>, images:
 @Composable
 fun DrawingCanvas(
     pageIndex: Int, isInfiniteCanvas: Boolean, cameraResetTrigger: Int, strokes: List<StrokeData>, selectedStrokes: List<StrokeData>, texts: List<TextData>, selectedTexts: List<TextData>, images: List<ImageData>, selectedImages: List<ImageData>, customFonts: List<CustomFont>, isSelectionActiveOnPage: Boolean, selectionMode: Int, currentColor: Color, currentStrokeWidth: Float, currentTool: DrawingTool, eraserType: Int, fingerDrawingEnabled: Boolean,
-    onStrokeAdd: (StrokeData) -> Unit, onStrokeRemove: (StrokeData) -> Unit, onTextToolTap: (Float, Float) -> Unit, onProcessSelection: (List<PointData>) -> Unit, onMoveSelection: (Float, Float) -> Unit, onScaleSelection: (Float, Float, Float) -> Unit, onCommitSelection: () -> Unit, modifier: Modifier = Modifier
+    onStrokeAdd: (StrokeData) -> Unit, onStrokeRemove: (StrokeData) -> Unit, onTextToolTap: (Float, Float) -> Unit, onTextEdit: (TextData) -> Unit, onProcessSelection: (List<PointData>) -> Unit, onMoveSelection: (Float, Float) -> Unit, onScaleSelection: (Float, Float, Float) -> Unit, onCommitSelection: () -> Unit, modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var currentPath by remember { mutableStateOf<Path?>(null) }
     var currentPoints by remember { mutableStateOf<MutableList<PointData>>(mutableListOf()) }
+    var lastTapTime by remember { mutableStateOf(0L) }
+    var lastTapPos by remember { mutableStateOf(Offset.Zero) }
     var trigger by remember { mutableIntStateOf(0) }
     var currentIsEraser by remember { mutableStateOf(false) }
 
@@ -77,16 +101,50 @@ fun DrawingCanvas(
     val baseImagePainters = images.map { it to rememberAsyncImagePainter(it.uri) }
     val selectedImagePainters = selectedImages.map { it to rememberAsyncImagePainter(it.uri) }
 
-    Canvas(modifier = modifier.fillMaxSize().pointerInput(Unit) {
+    Canvas(modifier = modifier.fillMaxSize().pointerInput(texts, selectedTexts, cameraZoom, cameraPan) {
         val virtualWidth = 1080f; var stylusModeActive = false
         awaitEachGesture {
             val down = awaitFirstDown()
+            
+            val currentEffectiveScale = (size.width / virtualWidth) * cameraZoom
+            val toVirtual = { x: Float, y: Float -> PointData((x - cameraPan.x) / currentEffectiveScale, (y - cameraPan.y) / currentEffectiveScale) }
+
+            // Handle double-tap for text editing
+            val now = System.currentTimeMillis()
+            val isDoubleTap = (now - lastTapTime) < 300L && 
+                kotlin.math.hypot(down.position.x - lastTapPos.x, down.position.y - lastTapPos.y) < 40f
+            
+            lastTapTime = now
+            lastTapPos = down.position
+
+            if (isDoubleTap) {
+                val tv = toVirtual(down.position.x, down.position.y)
+                val textPaint = android.text.TextPaint()
+                val allTexts = texts + selectedTexts
+                allTexts.forEach { textData ->
+                    textPaint.textSize = textData.fontSize
+                    val width = textData.maxWidth.toInt().coerceAtLeast(1)
+                    val layout = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        android.text.StaticLayout.Builder.obtain(textData.text, 0, textData.text.length, textPaint, width).build()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.text.StaticLayout(textData.text, textPaint, width, android.text.Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false)
+                    }
+                    val textHeight = layout.height.toFloat()
+                    var actualMaxWidth = 0f
+                    for (i in 0 until layout.lineCount) {
+                        actualMaxWidth = maxOf(actualMaxWidth, layout.getLineWidth(i))
+                    }
+                    if (tv.x >= textData.x && tv.x <= textData.x + actualMaxWidth && tv.y >= textData.y && tv.y <= textData.y + textHeight) {
+                        onTextEdit(textData)
+                        return@awaitEachGesture
+                    }
+                }
+            }
+
             val isStylusOrEraser = down.type == PointerType.Stylus || down.type == PointerType.Eraser
             if (isStylusOrEraser) stylusModeActive = true
             val isAllowedTouch = if (updatedFingerDrawingEnabled) { !stylusModeActive || isStylusOrEraser } else { isStylusOrEraser }
-
-            val currentEffectiveScale = (size.width / virtualWidth) * cameraZoom
-            val toVirtual = { x: Float, y: Float -> PointData((x - cameraPan.x) / currentEffectiveScale, (y - cameraPan.y) / currentEffectiveScale) }
 
             if (updatedTool == DrawingTool.TEXT && isAllowedTouch) { val v = toVirtual(down.position.x, down.position.y); onTextToolTap(v.x, v.y); return@awaitEachGesture }
 
@@ -283,10 +341,59 @@ fun DrawingCanvas(
                 restoreToCount(layerCount)
             }
 
-            texts.forEach { textData -> val fontInfo = customFonts.find { it.name == textData.fontName }; val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName); drawContext.canvas.nativeCanvas.apply { save(); scale(1f / effectiveScale, 1f / effectiveScale); val paint = android.graphics.Paint().apply { color = textData.colorArgb; textSize = textData.fontSize * effectiveScale; typeface = tf; isAntiAlias = true; isLinearText = true; isSubpixelText = true }; drawText(textData.text, textData.x * effectiveScale, textData.y * effectiveScale, paint); restore() } }
+            texts.forEach { textData ->
+                val fontInfo = customFonts.find { it.name == textData.fontName }
+                val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName)
+                drawContext.canvas.nativeCanvas.apply {
+                    save()
+                    translate(textData.x, textData.y)
+                    val textPaint = android.text.TextPaint().apply {
+                        color = textData.colorArgb
+                        textSize = textData.fontSize
+                        typeface = tf
+                        isAntiAlias = true
+                    }
+                    val width = textData.maxWidth.toInt().coerceAtLeast(1)
+                    val layout = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        android.text.StaticLayout.Builder.obtain(textData.text, 0, textData.text.length, textPaint, width)
+                            .setAlignment(android.text.Layout.Alignment.ALIGN_NORMAL)
+                            .build()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.text.StaticLayout(textData.text, textPaint, width, android.text.Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false)
+                    }
+                    layout.draw(this)
+                    restore()
+                }
+            }
 
             if (updatedIsSelectionActive) {
-                updatedSelectedTexts.forEach { textData -> val fontInfo = customFonts.find { it.name == textData.fontName }; val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName); drawContext.canvas.nativeCanvas.apply { save(); scale(1f / effectiveScale, 1f / effectiveScale); val paint = android.graphics.Paint().apply { color = textData.colorArgb; textSize = textData.fontSize * effectiveScale; typeface = tf; isAntiAlias = true; isLinearText = true; isSubpixelText = true; alpha = 128 }; drawText(textData.text, textData.x * effectiveScale, textData.y * effectiveScale, paint); restore() } }
+                updatedSelectedTexts.forEach { textData ->
+                    val fontInfo = customFonts.find { it.name == textData.fontName }
+                    val tf = TypefaceManager.getTypeface(context, textData.fontName, fontInfo?.fileName)
+                    drawContext.canvas.nativeCanvas.apply {
+                        save()
+                        translate(textData.x, textData.y)
+                        val textPaint = android.text.TextPaint().apply {
+                            color = textData.colorArgb
+                            textSize = textData.fontSize
+                            typeface = tf
+                            isAntiAlias = true
+                            alpha = 128
+                        }
+                        val width = textData.maxWidth.toInt().coerceAtLeast(1)
+                        val layout = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                            android.text.StaticLayout.Builder.obtain(textData.text, 0, textData.text.length, textPaint, width)
+                                .setAlignment(android.text.Layout.Alignment.ALIGN_NORMAL)
+                                .build()
+                        } else {
+                            @Suppress("DEPRECATION")
+                            android.text.StaticLayout(textData.text, textPaint, width, android.text.Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false)
+                        }
+                        layout.draw(this)
+                        restore()
+                    }
+                }
                 selectedImagePainters.forEach { (img, painter) -> translate(left = img.x, top = img.y) { with(painter) { draw(size = Size(img.width, img.height), alpha = 0.5f) } } }
                 val bounds = getSelectionBounds(updatedSelectedStrokes, updatedSelectedTexts, updatedSelectedImages)
                 if (bounds.width > 0f) { val pad = 20f; val left = bounds.left - pad; val top = bounds.top - pad; val right = bounds.right + pad; val bottom = bounds.bottom + pad; drawRect(color = Color.Blue, topLeft = Offset(left, top), size = Size(right - left, bottom - top), style = Stroke(width = 3f / cameraZoom, pathEffect = PathEffect.dashPathEffect(floatArrayOf(20f, 20f))), alpha = 0.5f); val handleColor = Color(0xFF2196F3); listOf(Offset(left, top), Offset(right, top), Offset(left, bottom), Offset(right, bottom)).forEach { corner -> drawCircle(color = handleColor, radius = 25f / cameraZoom, center = corner); drawCircle(color = Color.White, radius = 12f / cameraZoom, center = corner) } }

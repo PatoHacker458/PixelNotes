@@ -72,6 +72,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     var showDeleteDialog by mutableStateOf(false)
     var showMoveDialog by mutableStateOf(false)
     var showShareDialog by mutableStateOf(false)
+    var showEmptyTrashDialog by mutableStateOf(false)
 
     var isImportingPdf by mutableStateOf(false)
     var pendingCameraUri by mutableStateOf<android.net.Uri?>(null)
@@ -126,6 +127,8 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         if (pathPoints.size < 3) return
         val page = currentPages[pageIndex]
 
+        val textPaint = android.text.TextPaint().apply { textSize = 40f } // Temporary paint for measurement
+
         val strokesToSelect = mutableListOf<StrokeData>()
         val remainingStrokes = mutableListOf<StrokeData>()
         page.drawingData.forEach { stroke ->
@@ -136,11 +139,22 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         val textsToSelect = mutableListOf<TextData>()
         val remainingTexts = mutableListOf<TextData>()
         page.textData.forEach { text ->
-            val textWidth = text.text.length * (text.fontSize * 0.6f)
-            val textHeight = text.fontSize
-            val corners = listOf(PointData(text.x, text.y - textHeight), PointData(text.x + textWidth, text.y - textHeight), PointData(text.x, text.y), PointData(text.x + textWidth, text.y))
+            textPaint.textSize = text.fontSize
+            val width = text.maxWidth.toInt().coerceAtLeast(1)
+            val layout = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                android.text.StaticLayout.Builder.obtain(text.text, 0, text.text.length, textPaint, width).build()
+            } else {
+                @Suppress("DEPRECATION")
+                android.text.StaticLayout(text.text, textPaint, width, android.text.Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false)
+            }
+            val textHeight = layout.height.toFloat()
+            var actualMaxWidth = 0f
+            for (i in 0 until layout.lineCount) {
+                actualMaxWidth = maxOf(actualMaxWidth, layout.getLineWidth(i))
+            }
+            val corners = listOf(PointData(text.x, text.y), PointData(text.x + actualMaxWidth, text.y), PointData(text.x, text.y + textHeight), PointData(text.x + actualMaxWidth, text.y + textHeight))
             var isSelected = corners.any { p -> if (selectionMode == 0) isPointInPolygon(p, pathPoints) else isPointInRect(p, pathPoints.first(), pathPoints.last()) }
-            if (!isSelected) { isSelected = pathPoints.any { p -> p.x >= text.x && p.x <= text.x + textWidth && p.y >= text.y - textHeight && p.y <= text.y } }
+            if (!isSelected) { isSelected = pathPoints.any { p -> p.x >= text.x && p.x <= text.x + actualMaxWidth && p.y >= text.y && p.y <= text.y + textHeight } }
             if (isSelected) textsToSelect.add(text) else remainingTexts.add(text)
         }
 
@@ -173,7 +187,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         if (scaleFactor <= 0f || scaleFactor.isNaN()) return
         val scaledStrokes = selectedStrokes.map { stroke -> stroke.copy(strokeWidth = stroke.strokeWidth * scaleFactor, points = stroke.points.map { p -> PointData(pivotX + (p.x - pivotX) * scaleFactor, pivotY + (p.y - pivotY) * scaleFactor) }) }
         selectedStrokes.clear(); selectedStrokes.addAll(scaledStrokes)
-        val scaledTexts = selectedTexts.map { text -> text.copy(x = pivotX + (text.x - pivotX) * scaleFactor, y = pivotY + (text.y - pivotY) * scaleFactor, fontSize = text.fontSize * scaleFactor) }
+        val scaledTexts = selectedTexts.map { text -> text.copy(x = pivotX + (text.x - pivotX) * scaleFactor, y = pivotY + (text.y - pivotY) * scaleFactor, fontSize = text.fontSize * scaleFactor, maxWidth = text.maxWidth * scaleFactor) }
         selectedTexts.clear(); selectedTexts.addAll(scaledTexts)
         val scaledImages = selectedImages.map { img -> img.copy(x = pivotX + (img.x - pivotX) * scaleFactor, y = pivotY + (img.y - pivotY) * scaleFactor, width = img.width * scaleFactor, height = img.height * scaleFactor) }
         selectedImages.clear(); selectedImages.addAll(scaledImages)
@@ -380,6 +394,18 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         }
     }
 
+    fun emptyTrash() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val trashedNotes = dao.getTrashedNotesSync()
+            trashedNotes.forEach { noteWP ->
+                noteWP.pages.forEach { page -> page.backgroundUri?.let { uri -> if (uri.contains("?pdfPage=")) { val path = uri.split("?pdfPage=")[0]; val file = java.io.File(path); if (file.exists()) file.delete() } } }
+                dao.deleteNote(noteWP.note)
+                dao.deletePagesByNoteId(noteWP.note.id)
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { showEmptyTrashDialog = false }
+        }
+    }
+
     fun toggleSelection(note: NoteWithPages) { if (selectedNotes.any { it.note.id == note.note.id }) selectedNotes.removeAll { it.note.id == note.note.id } else selectedNotes.add(note) }
     fun clearSelection() { selectedNotes.clear() }
     fun moveSelectedNotes(newFolder: String) { viewModelScope.launch { selectedNotes.forEach { dao.updateNote(it.note.copy(folder = newFolder)) }; clearSelection() } }
@@ -490,6 +516,15 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
             e.printStackTrace()
         }
         mediaPlayer = null
+    }
+
+    fun updateTextOnPage(pageIndex: Int, oldText: TextData, newText: String) {
+        val page = currentPages[pageIndex]
+        val updatedText = oldText.copy(text = newText)
+        currentPages[pageIndex] = page.copy(textData = page.textData.map { if (it.id == oldText.id) updatedText else it })
+        undoStack.add(EditorAction(pageIndex, null, oldText, null, null, false))
+        undoStack.add(EditorAction(pageIndex, null, updatedText, null, null, true))
+        redoStack.clear()
     }
 
     private fun addAudioToPage(pageIndex: Int, audio: com.midknight.pixelnotes.domain.AudioData) {

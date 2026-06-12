@@ -239,12 +239,54 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     var showPagesPanel by remember { mutableStateOf(false) }
 
     var isTextEditing by remember { mutableStateOf(false) }
+    var editingTextData by remember { mutableStateOf<com.midknight.pixelnotes.domain.TextData?>(null) }
     var currentTextInput by remember { mutableStateOf("") }
     var textEditX by remember { mutableFloatStateOf(0f) }
     var textEditY by remember { mutableFloatStateOf(0f) }
     var textEditPageIndex by remember { mutableIntStateOf(0) }
 
-    if (isTextEditing) { AlertDialog(onDismissRequest = { isTextEditing = false }, title = { Text("Add Text") }, text = { OutlinedTextField(value = currentTextInput, onValueChange = { currentTextInput = it }, modifier = Modifier.fillMaxWidth(), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp), placeholder = { Text("Type something...") }) }, confirmButton = { TextButton(onClick = { if (currentTextInput.isNotBlank()) { viewModel.addTextToPage(textEditPageIndex, TextData(x = textEditX, y = textEditY, text = currentTextInput, colorArgb = viewModel.currentColor.toArgb(), fontSize = viewModel.currentTextSize, fontName = viewModel.currentFontName)) }; isTextEditing = false }) { Text("Place Text") } }, dismissButton = { TextButton(onClick = { isTextEditing = false }) { Text("Cancel") } }) }
+    if (isTextEditing) {
+        AlertDialog(
+            onDismissRequest = { isTextEditing = false; editingTextData = null },
+            title = { Text(if (editingTextData == null) "Add Text" else "Edit Text") },
+            text = {
+                OutlinedTextField(
+                    value = currentTextInput,
+                    onValueChange = { currentTextInput = it },
+                    modifier = Modifier.fillMaxWidth().height(150.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp),
+                    placeholder = { Text("Type something...") },
+                    minLines = 3
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (currentTextInput.isNotBlank()) {
+                        val existing = editingTextData
+                        if (existing != null) {
+                            viewModel.updateTextOnPage(textEditPageIndex, existing, currentTextInput)
+                        } else {
+                            viewModel.addTextToPage(
+                                textEditPageIndex,
+                                com.midknight.pixelnotes.domain.TextData(
+                                    x = textEditX,
+                                    y = textEditY,
+                                    text = currentTextInput,
+                                    colorArgb = viewModel.currentColor.toArgb(),
+                                    fontSize = viewModel.currentTextSize,
+                                    fontName = viewModel.currentFontName,
+                                    maxWidth = 600f
+                                )
+                            )
+                        }
+                    }
+                    isTextEditing = false
+                    editingTextData = null
+                }) { Text(if (editingTextData == null) "Place Text" else "Update Text") }
+            },
+            dismissButton = { TextButton(onClick = { isTextEditing = false; editingTextData = null }) { Text("Cancel") } }
+        )
+    }
     if (viewModel.isImportingPdf) { AlertDialog(onDismissRequest = {}, title = { Text("Opening Document", fontWeight = FontWeight.Bold) }, text = { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(); Spacer(modifier = Modifier.width(16.dp)); Text("Loading PDF engine...") } }, confirmButton = {}, properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) }
 
     val listState = rememberLazyListState()
@@ -301,7 +343,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
                             onStrokeAdd = { viewModel.addStrokeToPage(0, it) },
                             onStrokeRemove = { viewModel.removeStrokeFromPage(0, it) },
-                            onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = 0; currentTextInput = ""; isTextEditing = true },
+                            onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = 0; currentTextInput = ""; editingTextData = null; isTextEditing = true },
+                            onTextEdit = { textData -> textEditPageIndex = 0; editingTextData = textData; currentTextInput = textData.text; isTextEditing = true },
                             onProcessSelection = { viewModel.processSelection(0, it) },
                             onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
                             onScaleSelection = { s, px, py -> viewModel.scaleSelection(s, px, py) },
@@ -366,7 +409,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
                                     onStrokeAdd = { viewModel.addStrokeToPage(index, it) },
                                     onStrokeRemove = { viewModel.removeStrokeFromPage(index, it) },
-                                    onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = index; currentTextInput = ""; isTextEditing = true },
+                                    onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = index; currentTextInput = ""; editingTextData = null; isTextEditing = true },
+                                    onTextEdit = { textData -> textEditPageIndex = index; editingTextData = textData; currentTextInput = textData.text; isTextEditing = true },
                                     onProcessSelection = { viewModel.processSelection(index, it) },
                                     onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
                                     onScaleSelection = { s, px, py -> viewModel.scaleSelection(s, px, py) },

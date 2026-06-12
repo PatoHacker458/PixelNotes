@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +61,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val database = NoteDatabase.getDatabase(this)
         val dao = database.noteDao()
 
@@ -108,7 +110,8 @@ class MainActivity : ComponentActivity() {
                                 text = if (isTrash) "Delete" else "Move", 
                                 onClick = { if (isTrash) viewModel.permanentlyDeleteSelected() else viewModel.moveToTrash(); viewModel.showDeleteDialog = false },
                                 containerColor = MaterialTheme.colorScheme.error,
-                                contentColor = MaterialTheme.colorScheme.onError
+                                contentColor = MaterialTheme.colorScheme.onError,
+                                isSquareEdge = true
                             )
                         },
                         dismissButton = { 
@@ -116,7 +119,8 @@ class MainActivity : ComponentActivity() {
                                 text = "Cancel", 
                                 onClick = { viewModel.showDeleteDialog = false },
                                 containerColor = Color.Transparent,
-                                contentColor = MaterialTheme.colorScheme.onSurface
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                                isSquareEdge = true
                             )
                         }
                     )
@@ -145,7 +149,8 @@ class MainActivity : ComponentActivity() {
                         confirmButton = { 
                             ExpressiveButton(
                                 text = "Move", 
-                                onClick = { viewModel.moveSelectedNotes(selectedFolder); viewModel.showMoveDialog = false }
+                                onClick = { viewModel.moveSelectedNotes(selectedFolder); viewModel.showMoveDialog = false },
+                                isSquareEdge = true
                             )
                         },
                         dismissButton = { 
@@ -153,7 +158,8 @@ class MainActivity : ComponentActivity() {
                                 text = "Cancel", 
                                 onClick = { viewModel.showMoveDialog = false },
                                 containerColor = Color.Transparent,
-                                contentColor = MaterialTheme.colorScheme.onSurface
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                                isSquareEdge = true
                             )
                         }
                     )
@@ -179,7 +185,8 @@ class MainActivity : ComponentActivity() {
                                         }
                                         viewModel.clearSelection()
                                     }
-                                }
+                                },
+                                isSquareEdge = true
                             )
                         },
                         dismissButton = {
@@ -197,7 +204,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                isSquareEdge = true
                             )
                         }
                     )
@@ -250,7 +258,7 @@ class MainActivity : ComponentActivity() {
                     },
                     gesturesEnabled = viewModel.currentScreen == 0 && viewModel.selectedNotes.isEmpty()
                 ) {
-                    Surface(modifier = Modifier.fillMaxSize().systemBarsPadding(), color = MaterialTheme.colorScheme.background) {
+                    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         Surface(modifier = Modifier.fillMaxSize()) {
                             when (viewModel.currentScreen) {
                                 0 -> NotesScreen(

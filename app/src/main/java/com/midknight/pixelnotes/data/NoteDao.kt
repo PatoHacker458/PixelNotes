@@ -57,6 +57,10 @@ interface NoteDao {
     @Query("UPDATE notes SET inTrash = 1 WHERE folder = :path OR folder LIKE :path || '/%'")
     suspend fun trashNotesInFolderCascade(path: String): Int
 
+    @Transaction
+    @Query("SELECT * FROM notes WHERE inTrash = 1")
+    suspend fun getTrashedNotesSync(): List<NoteWithPages>
+
     @Delete
     suspend fun deleteFolder(folder: FolderEntity): Int
 
