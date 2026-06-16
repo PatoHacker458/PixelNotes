@@ -8,7 +8,6 @@ object TypefaceManager {
     private val cache = mutableMapOf<String, Typeface>()
 
     fun getTypeface(context: Context, fontName: String, fileName: String?): Typeface {
-        // Fuentes predeterminadas del sistema
         if (fontName == "Default" || fontName.isEmpty()) return Typeface.DEFAULT
         if (fontName == "Serif") return Typeface.SERIF
         if (fontName == "Monospace") return Typeface.MONOSPACE

@@ -58,6 +58,10 @@ interface NoteDao {
     suspend fun trashNotesInFolderCascade(path: String): Int
 
     @Transaction
+    @Query("SELECT * FROM notes")
+    suspend fun getNotesWithPagesSync(): List<NoteWithPages>
+
+    @Transaction
     @Query("SELECT * FROM notes WHERE inTrash = 1")
     suspend fun getTrashedNotesSync(): List<NoteWithPages>
 
@@ -72,4 +76,7 @@ interface NoteDao {
 
     @Delete
     suspend fun deleteCustomFont(font: CustomFont): Int
+
+    @Query("SELECT MAX(updatedAt) FROM notes")
+    suspend fun getLastUpdatedTimestamp(): Long?
 }

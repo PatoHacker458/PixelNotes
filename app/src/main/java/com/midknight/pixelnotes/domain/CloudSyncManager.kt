@@ -2,6 +2,7 @@ package com.midknight.pixelnotes.domain
 
 import android.content.Context
 import android.util.Log
+import com.midknight.pixelnotes.data.NoteDatabase
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.FileContent
 import com.google.api.client.http.javanet.NetHttpTransport
@@ -22,13 +23,13 @@ class CloudSyncManager(private val context: Context) {
     private val TAG = "CloudSyncManager"
     private val backupFileName = "PixelNotes_Backup.zip"
 
-    suspend fun backupToDrive(accountName: String): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun backupToDrive(accountName: String, force: Boolean = false): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             if (accountName.isBlank()) {
                 return@withContext Result.failure(Exception("Account email is empty. Please sign out and sign in again."))
             }
 
-            Log.d(TAG, "Starting backup for: $accountName")
+            Log.d(TAG, "Starting backup for: $accountName (force=$force)")
 
             // Use a more explicit credential setup
             val credential = GoogleAccountCredential.usingOAuth2(context, listOf(DriveScopes.DRIVE_APPDATA))
@@ -38,26 +39,40 @@ class CloudSyncManager(private val context: Context) {
                 .setApplicationName("Pixel Notes")
                 .build()
 
-            val zipFile = createBackupZip()
+            // IMPORTANT: Create a perfectly consistent snapshot of the DB
+            val snapshotFile = File(context.cacheDir, "db_snapshot.db")
+            NoteDatabase.createBackupSnapshot(context, snapshotFile)
+            
+            val localTimestamp = NoteDatabase.getDatabase(context).noteDao().getLastUpdatedTimestamp() ?: 0L
+            Log.d(TAG, "Database snapshot created for backup. TS: $localTimestamp")
+
+            val zipFile = createBackupZip(snapshotFile)
+            Log.d(TAG, "Backup ZIP created: ${zipFile.absolutePath} (${zipFile.length()} bytes)")
 
             // Search for existing backup
             val query = "name = '$backupFileName' and 'appDataFolder' in parents and trashed = false"
             val filesList = drive.files().list()
                 .setSpaces("appDataFolder")
                 .setQ(query)
+                .setFields("files(id, name, description)")
                 .execute()
             val files = filesList.files
 
             val content = FileContent("application/zip", zipFile)
+            val fileMetadata = com.google.api.services.drive.model.File().apply {
+                description = localTimestamp.toString()
+            }
 
             if (files.isNullOrEmpty()) {
-                val metadata = com.google.api.services.drive.model.File()
-                metadata.setName(backupFileName)
-                metadata.setParents(listOf("appDataFolder"))
-                drive.files().create(metadata, content).execute()
+                Log.d(TAG, "No existing backup found. Creating new one.")
+                fileMetadata.setName(backupFileName)
+                fileMetadata.setParents(listOf("appDataFolder"))
+                val created = drive.files().create(fileMetadata, content).setFields("id, description").execute()
+                Log.d(TAG, "Created initial backup. ID: ${created.id}, TS: ${created.description}")
             } else {
-                val updateMetadata = com.google.api.services.drive.model.File()
-                drive.files().update(files[0].id, updateMetadata, content).execute()
+                Log.d(TAG, "Updating cloud backup... (Local TS: $localTimestamp)")
+                val updated = drive.files().update(files[0].id, fileMetadata, content).setFields("id, description").execute()
+                Log.d(TAG, "Backup updated. ID: ${updated.id}, TS: ${updated.description}")
             }
 
             zipFile.delete()
@@ -65,6 +80,66 @@ class CloudSyncManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Backup failed for $accountName", e)
             Result.failure(e)
+        }
+    }
+
+    suspend fun purgeAllCloudBackups(accountName: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            if (accountName.isBlank()) return@withContext Result.failure(Exception("Account email is empty"))
+
+            val credential = GoogleAccountCredential.usingOAuth2(context, listOf(DriveScopes.DRIVE_APPDATA))
+            credential.selectedAccount = android.accounts.Account(accountName, "com.google")
+
+            val drive = Drive.Builder(NetHttpTransport(), GsonFactory.getDefaultInstance(), credential)
+                .setApplicationName("Pixel Notes")
+                .build()
+
+            // List all files in appDataFolder
+            val filesList = drive.files().list()
+                .setSpaces("appDataFolder")
+                .setFields("files(id, name)")
+                .execute()
+            val files = filesList.files
+
+            if (!files.isNullOrEmpty()) {
+                Log.d(TAG, "Purging ${files.size} files from cloud...")
+                files.forEach { file ->
+                    drive.files().delete(file.id).execute()
+                    Log.d(TAG, "Deleted: ${file.name} (${file.id})")
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Purge failed for $accountName", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun downloadBackupToTemp(accountName: String): File? = withContext(Dispatchers.IO) {
+        try {
+            if (accountName.isBlank()) return@withContext null
+
+            val credential = GoogleAccountCredential.usingOAuth2(context, listOf(DriveScopes.DRIVE_APPDATA))
+            credential.selectedAccount = android.accounts.Account(accountName, "com.google")
+
+            val drive = Drive.Builder(NetHttpTransport(), GsonFactory.getDefaultInstance(), credential)
+                .setApplicationName("Pixel Notes")
+                .build()
+
+            val query = "name = '$backupFileName' and 'appDataFolder' in parents and trashed = false"
+            val filesList = drive.files().list().setSpaces("appDataFolder").setQ(query).setFields("files(id, name)").execute()
+            val files = filesList.files
+
+            if (files.isNullOrEmpty()) return@withContext null
+
+            val tempZip = File(context.cacheDir, "merge_temp.zip")
+            FileOutputStream(tempZip).use { output ->
+                drive.files().get(files[0].id).executeMediaAndDownloadTo(output)
+            }
+            return@withContext tempZip
+        } catch (e: Exception) {
+            Log.e(TAG, "Download for merge failed", e)
+            return@withContext null
         }
     }
 
@@ -80,7 +155,7 @@ class CloudSyncManager(private val context: Context) {
                 .build()
 
             val query = "name = '$backupFileName' and 'appDataFolder' in parents and trashed = false"
-            val filesList = drive.files().list().setSpaces("appDataFolder").setQ(query).execute()
+            val filesList = drive.files().list().setSpaces("appDataFolder").setQ(query).setFields("files(id, name, description)").execute()
             val files = filesList.files
 
             if (files.isNullOrEmpty()) {
@@ -88,7 +163,7 @@ class CloudSyncManager(private val context: Context) {
                 return@withContext Result.failure(Exception("No backup found on Google Drive"))
             }
 
-            Log.d(TAG, "Backup found: ${files[0].id}. Downloading...")
+            Log.d(TAG, "Backup found: ${files[0].id}. Downloading and overwriting local data...")
             val tempZip = File(context.cacheDir, "restore_temp.zip")
             FileOutputStream(tempZip).use { output ->
                 drive.files().get(files[0].id).executeMediaAndDownloadTo(output)
@@ -114,7 +189,7 @@ class CloudSyncManager(private val context: Context) {
             File(dbFile.path + "-shm").delete()
             File(dbFile.path + "-wal").delete()
 
-            listOf("audio_notes", "custom_fonts", "imported_pdfs").forEach { dir ->
+            listOf("audio_notes", "custom_fonts", "imported_pdfs", "inserted_images").forEach { dir ->
                 File(context.filesDir, dir).deleteRecursively()
             }
             Log.d(TAG, "Local data cleared successfully")
@@ -123,18 +198,22 @@ class CloudSyncManager(private val context: Context) {
         }
     }
 
-    private fun createBackupZip(): File {
+    internal fun createBackupZip(dbSnapshot: File? = null): File {
         val zipFile = File(context.cacheDir, "backup_upload.zip")
         ZipOutputStream(FileOutputStream(zipFile)).use { zos ->
-            val dbFile = context.getDatabasePath("pixel_notes_database")
-            if (dbFile.exists()) addToZip(zos, dbFile, "database/pixel_notes_database")
+            zos.setLevel(java.util.zip.Deflater.BEST_COMPRESSION)
+            
+            if (dbSnapshot != null && dbSnapshot.exists()) {
+                addToZip(zos, dbSnapshot, "database/pixel_notes_database")
+            } else {
+                val dbFile = context.getDatabasePath("pixel_notes_database")
+                if (dbFile.exists()) addToZip(zos, dbFile, "database/pixel_notes_database")
+            }
 
-            val shmFile = File(dbFile.path + "-shm")
-            if (shmFile.exists()) addToZip(zos, shmFile, "database/pixel_notes_database-shm")
-            val walFile = File(dbFile.path + "-wal")
-            if (walFile.exists()) addToZip(zos, walFile, "database/pixel_notes_database-wal")
+            // EXCLUDE -shm and -wal files. Since we checkpointed (and optionally snapshotted),
+            // the main .db file is guaranteed to be consistent.
 
-            val dirs = listOf("audio_notes", "custom_fonts", "imported_pdfs")
+            val dirs = listOf("audio_notes", "custom_fonts", "imported_pdfs", "inserted_images")
             dirs.forEach { dirName ->
                 val dir = File(context.filesDir, dirName)
                 if (dir.exists()) {
@@ -147,7 +226,7 @@ class CloudSyncManager(private val context: Context) {
         return zipFile
     }
 
-    private fun addToZip(zos: ZipOutputStream, file: File, path: String) {
+    internal fun addToZip(zos: ZipOutputStream, file: File, path: String) {
         try {
             zos.putNextEntry(ZipEntry(path))
             FileInputStream(file).use { it.copyTo(zos) }
@@ -157,24 +236,10 @@ class CloudSyncManager(private val context: Context) {
         }
     }
 
-    private fun extractBackupZip(zipFile: File) {
+    internal fun extractBackupZip(zipFile: File) {
         Log.d(TAG, "Starting extraction of ZIP: ${zipFile.absolutePath}")
         
-        // 1. CLEAR CURRENT DATABASE FILES FIRST
-        // This is critical to prevent SQLite from recovering from old WAL/SHM files
-        val dbFile = context.getDatabasePath("pixel_notes_database")
-        if (dbFile.exists()) dbFile.delete()
-        File(dbFile.path + "-shm").delete()
-        File(dbFile.path + "-wal").delete()
-
-        // 2. CLEAR CURRENT MEDIA FOLDERS
-        listOf("audio_notes", "custom_fonts", "imported_pdfs").forEach { 
-            val dir = File(context.filesDir, it)
-            if (dir.exists()) {
-                val deleted = dir.deleteRecursively()
-                Log.d(TAG, "Deleting local dir $it: $deleted")
-            }
-        }
+        clearLocalData()
 
         ZipInputStream(FileInputStream(zipFile)).use { zis ->
             var entry = zis.nextEntry

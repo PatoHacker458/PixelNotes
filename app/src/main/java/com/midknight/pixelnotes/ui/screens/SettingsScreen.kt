@@ -126,7 +126,7 @@ fun SettingsScreen(viewModel: NotesViewModel) {
             TopAppBar(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = { viewModel.currentScreen = 0 }) {
+                    IconButton(onClick = { viewModel.navigateBack() }) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },

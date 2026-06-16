@@ -117,12 +117,23 @@ class PdfExporter(private val context: Context) {
 
         page.imageData.forEach { img ->
             try {
-                val uri = Uri.parse(img.uri)
-                context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                    val bitmap = BitmapFactory.decodeStream(inputStream)
+                val resolvedUri = if (img.uri.startsWith("internal://")) {
+                    val fileName = img.uri.removePrefix("internal://")
+                    Uri.fromFile(java.io.File(context.filesDir, "inserted_images/$fileName"))
+                } else if (img.uri.contains("inserted_images/")) {
+                    val fileName = img.uri.substringAfterLast("/")
+                    Uri.fromFile(java.io.File(context.filesDir, "inserted_images/$fileName"))
+                } else {
+                    Uri.parse(img.uri)
+                }
+
+                context.contentResolver.openInputStream(resolvedUri)?.use { inputStream ->
+                    val options = BitmapFactory.Options().apply { inMutable = true }
+                    val bitmap = BitmapFactory.decodeStream(inputStream, null, options)
                     if (bitmap != null) {
                         val destRect = Rect(img.x.toInt() + offsetX, img.y.toInt() + offsetY, (img.x + img.width).toInt() + offsetX, (img.y + img.height).toInt() + offsetY)
-                        pdfCanvas.drawBitmap(bitmap, null, destRect, null)
+                        val imgPaint = Paint().apply { isFilterBitmap = true; isAntiAlias = true }
+                        pdfCanvas.drawBitmap(bitmap, null, destRect, imgPaint)
                         bitmap.recycle()
                     }
                 }

@@ -1,6 +1,8 @@
 package com.midknight.pixelnotes.ui.screens
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -9,13 +11,19 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,18 +41,29 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.ContentPasteGo
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.Grain
@@ -59,11 +78,11 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ViewHeadline
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -87,6 +106,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -105,8 +125,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -125,6 +147,7 @@ import com.midknight.pixelnotes.data.NoteWithPages
 import com.midknight.pixelnotes.data.PageEntity
 import com.midknight.pixelnotes.domain.PdfExporter
 import com.midknight.pixelnotes.domain.TextData
+import com.midknight.pixelnotes.ui.components.AudioPlayerSlider
 import com.midknight.pixelnotes.ui.components.DrawingCanvas
 import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
 import com.midknight.pixelnotes.ui.viewmodels.DrawingTool
@@ -182,13 +205,24 @@ fun PaperTemplate(style: Int, modifier: Modifier = Modifier) {
 @Composable
 fun DrawingScreen(viewModel: NotesViewModel) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp
+    val isSmallScreen = screenWidth < 600
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val customFonts by viewModel.customFonts.collectAsState()
 
     DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) { if (!viewModel.isNoteBlank()) { viewModel.saveCurrentNote(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())) } } }
+        val observer = LifecycleEventObserver { _, event -> 
+            if (event == Lifecycle.Event.ON_STOP) { 
+                // Only auto-save if we aren't currently performing a cloud sync or restore
+                // This prevents "Connection Pool Closed" crashes during sign-out/restore
+                if (!viewModel.isNoteBlank() && !viewModel.isSyncing) { 
+                    viewModel.saveCurrentNote(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())) 
+                } 
+            } 
+        }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
@@ -213,6 +247,21 @@ fun DrawingScreen(viewModel: NotesViewModel) {
 
     val pdfImportLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.GetContent()) { uri -> uri?.let { viewModel.importPdfDocument(context, it) } }
 
+    val pxNoteExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        uri?.let {
+            val noteToExport = viewModel.selectedNoteWithPages?.copy(
+                note = viewModel.selectedNoteWithPages!!.note.copy(title = viewModel.currentTitle),
+                pages = viewModel.currentPages.toList()
+            ) ?: NoteWithPages(
+                note = Note(title = viewModel.currentTitle, content = "", date = "", folder = "General", isInfinite = viewModel.isCurrentNoteInfinite),
+                pages = viewModel.currentPages.toList()
+            )
+            viewModel.exportSingleNote(context, noteToExport, it)
+        }
+    }
+
     val floatingImagePickerLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let {
             context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -220,7 +269,16 @@ fun DrawingScreen(viewModel: NotesViewModel) {
         }
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.TakePicture()) { success ->
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = object : ActivityResultContracts.TakePicture() {
+            override fun createIntent(context: Context, input: Uri): Intent {
+                return super.createIntent(context, input).apply {
+                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }
+        }
+    ) { success ->
         if (success) { viewModel.pendingCameraUri?.let { uri -> viewModel.addFloatingImageToPage(viewModel.activePageIndex, uri.toString()) } }
     }
 
@@ -237,10 +295,14 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     var showPaperMenu by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showPagesPanel by remember { mutableStateOf(false) }
+    var showBottomBar by remember { mutableStateOf(true) }
+    var showContextMenu by remember { mutableStateOf(false) }
+    var contextMenuPos by remember { mutableStateOf(Offset.Zero) }
 
     var isTextEditing by remember { mutableStateOf(false) }
-    var editingTextData by remember { mutableStateOf<com.midknight.pixelnotes.domain.TextData?>(null) }
+    var editingTextData by remember { mutableStateOf<TextData?>(null) }
     var currentTextInput by remember { mutableStateOf("") }
+    var selectedFontName by remember { mutableStateOf("Default") }
     var textEditX by remember { mutableFloatStateOf(0f) }
     var textEditY by remember { mutableFloatStateOf(0f) }
     var textEditPageIndex by remember { mutableIntStateOf(0) }
@@ -250,21 +312,54 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             onDismissRequest = { isTextEditing = false; editingTextData = null },
             title = { Text(if (editingTextData == null) "Add Text" else "Edit Text") },
             text = {
-                OutlinedTextField(
-                    value = currentTextInput,
-                    onValueChange = { currentTextInput = it },
-                    modifier = Modifier.fillMaxWidth().height(150.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp),
-                    placeholder = { Text("Type something...") },
-                    minLines = 3
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = currentTextInput,
+                        onValueChange = { currentTextInput = it },
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp),
+                        placeholder = { Text("Type something...") },
+                        minLines = 3
+                    )
+                    
+                    Text("Font", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    val allFontNames = listOf("Default", "Serif", "Monospace", "Cursive") + customFonts.map { it.name }
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(allFontNames) { fontName ->
+                            val isSelected = selectedFontName == fontName
+                            val fontInfo = customFonts.find { it.name == fontName }
+                            val tf = com.midknight.pixelnotes.domain.TypefaceManager.getTypeface(context, fontName, fontInfo?.fileName)
+                            val fontFamily = FontFamily(tf)
+                            
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    .border(width = 1.dp, color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent, shape = RoundedCornerShape(12.dp))
+                                    .clickable { selectedFontName = fontName }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = fontName,
+                                    fontFamily = fontFamily,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
                     if (currentTextInput.isNotBlank()) {
                         val existing = editingTextData
                         if (existing != null) {
-                            viewModel.updateTextOnPage(textEditPageIndex, existing, currentTextInput)
+                            viewModel.updateTextOnPage(textEditPageIndex, existing, currentTextInput, selectedFontName)
                         } else {
                             viewModel.addTextToPage(
                                 textEditPageIndex,
@@ -274,7 +369,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     text = currentTextInput,
                                     colorArgb = viewModel.currentColor.toArgb(),
                                     fontSize = viewModel.currentTextSize,
-                                    fontName = viewModel.currentFontName,
+                                    fontName = selectedFontName,
                                     maxWidth = 600f
                                 )
                             )
@@ -327,6 +422,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             pageIndex = 0,
                             isInfiniteCanvas = true,
                             cameraResetTrigger = viewModel.cameraResetTrigger,
+                            cameraPan = viewModel.cameraPan,
+                            cameraZoom = viewModel.cameraZoom,
                             strokes = page.drawingData,
                             selectedStrokes = if (viewModel.selectionPageIndex == 0) viewModel.selectedStrokes else emptyList(),
                             texts = page.textData,
@@ -335,6 +432,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             selectedImages = if (viewModel.selectionPageIndex == 0) viewModel.selectedImages else emptyList(),
                             customFonts = customFonts,
                             isSelectionActiveOnPage = viewModel.selectionPageIndex == 0,
+                            isClipboardEmpty = viewModel.isClipboardEmpty,
                             selectionMode = viewModel.selectionMode,
                             currentColor = viewModel.currentColor,
                             currentStrokeWidth = if (viewModel.currentTool == DrawingTool.ERASER) viewModel.currentEraserWidth else viewModel.currentStrokeWidth,
@@ -343,25 +441,89 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
                             onStrokeAdd = { viewModel.addStrokeToPage(0, it) },
                             onStrokeRemove = { viewModel.removeStrokeFromPage(0, it) },
-                            onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = 0; currentTextInput = ""; editingTextData = null; isTextEditing = true },
-                            onTextEdit = { textData -> textEditPageIndex = 0; editingTextData = textData; currentTextInput = textData.text; isTextEditing = true },
+                            onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = 0; currentTextInput = ""; selectedFontName = viewModel.currentFontName; editingTextData = null; isTextEditing = true },
+                            onTextEdit = { textData -> textEditPageIndex = 0; editingTextData = textData; currentTextInput = textData.text; selectedFontName = textData.fontName; isTextEditing = true },
                             onProcessSelection = { viewModel.processSelection(0, it) },
                             onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
                             onScaleSelection = { s, px, py -> viewModel.scaleSelection(s, px, py) },
                             onCommitSelection = { viewModel.commitSelection() },
+                            onSelectionLongPress = { pos -> contextMenuPos = pos; showContextMenu = true },
+                            onCameraChange = { pan, zoom -> viewModel.cameraPan = pan; viewModel.cameraZoom = zoom },
                             modifier = Modifier.fillMaxSize()
                         )
 
-                        page.audioData.forEach { audio ->
-                            Box(
-                                modifier = Modifier
-                                    .offset(x = with(LocalDensity.current) { (audio.x).toDp() }, y = with(LocalDensity.current) { (audio.y).toDp() })
-                                    .size(48.dp).clip(CircleShape)
-                                    .background(if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Color.Red.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
-                                    .clickable { viewModel.playAudio(audio.uri) },
-                                contentAlignment = Alignment.Center
+                        if (showContextMenu && (!viewModel.isSelectionEmpty || !viewModel.isClipboardEmpty)) {
+                            DropdownMenu(
+                                expanded = showContextMenu,
+                                onDismissRequest = { showContextMenu = false },
+                                offset = with(LocalDensity.current) { androidx.compose.ui.unit.DpOffset(contextMenuPos.x.toDp(), (contextMenuPos.y - maxHeightPx).toDp()) }
                             ) {
-                                Icon(imageVector = if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                                if (!viewModel.isSelectionEmpty) {
+                                    DropdownMenuItem(
+                                        text = { Text("Copy") },
+                                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                                        onClick = { viewModel.copySelection(); showContextMenu = false }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Duplicate") },
+                                        leadingIcon = { Icon(Icons.Default.ContentPasteGo, contentDescription = null) },
+                                        onClick = { viewModel.duplicateSelection(); showContextMenu = false }
+                                    )
+                                }
+                                if (!viewModel.isClipboardEmpty) {
+                                    DropdownMenuItem(
+                                        text = { Text("Paste") },
+                                        leadingIcon = { Icon(Icons.Default.ContentPaste, contentDescription = null) },
+                                        onClick = { viewModel.pasteSelection(0, contextMenuPos.x, contextMenuPos.y); showContextMenu = false }
+                                    )
+                                }
+                                if (!viewModel.isSelectionEmpty) {
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                        onClick = { viewModel.deleteSelection(); showContextMenu = false }
+                                    )
+                                }
+                            }
+                        }
+
+                        page.audioData.forEach { audio ->
+                            key(audio.id) {
+                                val virtualWidth = 1080f
+                                val effectiveScale = (maxWidthPx / virtualWidth) * viewModel.cameraZoom
+                                val actualX = audio.x * effectiveScale + viewModel.cameraPan.x
+                                val actualY = audio.y * effectiveScale + viewModel.cameraPan.y
+                                
+                                var audioOffset by remember(audio.id) { mutableStateOf(Offset(actualX, actualY)) }
+                                val isActive = viewModel.activeAudioId == audio.id
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = with(LocalDensity.current) { (actualX).toDp() }, y = with(LocalDensity.current) { (actualY).toDp() })
+                                        .size(48.dp).clip(CircleShape)
+                                        .background(if (isActive && viewModel.isPlaying) Color.Red.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
+                                        .border(if (isActive) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                        .pointerInput(audio.id) {
+                                            detectDragGestures(
+                                                onDragEnd = { 
+                                                    val finalX = (audioOffset.x - viewModel.cameraPan.x) / effectiveScale
+                                                    val finalY = (audioOffset.y - viewModel.cameraPan.y) / effectiveScale
+                                                    viewModel.updateAudioPosition(0, audio.id, finalX, finalY) 
+                                                }
+                                            ) { change, dragAmount ->
+                                                change.consume()
+                                                audioOffset += dragAmount
+                                            }
+                                        }
+                                        .pointerInput(audio.id) {
+                                            detectTapGestures(
+                                                onTap = { viewModel.playAudio(audio.uri, audio.id, 0) }
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(imageVector = if (isActive && viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                                }
                             }
                         }
                     }
@@ -393,6 +555,8 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     pageIndex = index,
                                     isInfiniteCanvas = false,
                                     cameraResetTrigger = viewModel.cameraResetTrigger,
+                                    cameraPan = viewModel.cameraPan,
+                                    cameraZoom = viewModel.cameraZoom,
                                     strokes = page.drawingData,
                                     selectedStrokes = if (viewModel.selectionPageIndex == index) viewModel.selectedStrokes else emptyList(),
                                     texts = page.textData,
@@ -401,6 +565,7 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     selectedImages = if (viewModel.selectionPageIndex == index) viewModel.selectedImages else emptyList(),
                                     customFonts = customFonts,
                                     isSelectionActiveOnPage = viewModel.selectionPageIndex == index,
+                                    isClipboardEmpty = viewModel.isClipboardEmpty,
                                     selectionMode = viewModel.selectionMode,
                                     currentColor = viewModel.currentColor,
                                     currentStrokeWidth = if (viewModel.currentTool == DrawingTool.ERASER) viewModel.currentEraserWidth else viewModel.currentStrokeWidth,
@@ -409,25 +574,86 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                     fingerDrawingEnabled = viewModel.fingerDrawingEnabled,
                                     onStrokeAdd = { viewModel.addStrokeToPage(index, it) },
                                     onStrokeRemove = { viewModel.removeStrokeFromPage(index, it) },
-                                    onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = index; currentTextInput = ""; editingTextData = null; isTextEditing = true },
-                                    onTextEdit = { textData -> textEditPageIndex = index; editingTextData = textData; currentTextInput = textData.text; isTextEditing = true },
+                                    onTextToolTap = { x, y -> textEditX = x; textEditY = y; textEditPageIndex = index; currentTextInput = ""; selectedFontName = viewModel.currentFontName; editingTextData = null; isTextEditing = true },
+                                    onTextEdit = { textData -> textEditPageIndex = index; editingTextData = textData; currentTextInput = textData.text; selectedFontName = textData.fontName; isTextEditing = true },
                                     onProcessSelection = { viewModel.processSelection(index, it) },
                                     onMoveSelection = { dx, dy -> viewModel.moveSelection(dx, dy) },
                                     onScaleSelection = { s, px, py -> viewModel.scaleSelection(s, px, py) },
                                     onCommitSelection = { viewModel.commitSelection() },
+                                    onSelectionLongPress = { pos -> contextMenuPos = pos; showContextMenu = true },
+                                    onCameraChange = { pan, zoom -> viewModel.cameraPan = pan; viewModel.cameraZoom = zoom },
                                     modifier = Modifier.fillMaxSize()
                                 )
 
-                                page.audioData.forEach { audio ->
-                                    Box(
-                                        modifier = Modifier
-                                            .offset(x = with(LocalDensity.current) { (audio.x).toDp() }, y = with(LocalDensity.current) { (audio.y).toDp() })
-                                            .size(48.dp).clip(CircleShape)
-                                            .background(if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Color.Red.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
-                                            .clickable { viewModel.playAudio(audio.uri) },
-                                        contentAlignment = Alignment.Center
+                                if (showContextMenu && viewModel.activePageIndex == index && (!viewModel.isSelectionEmpty || !viewModel.isClipboardEmpty)) {
+                                    DropdownMenu(
+                                        expanded = showContextMenu,
+                                        onDismissRequest = { showContextMenu = false },
+                                        offset = with(LocalDensity.current) { androidx.compose.ui.unit.DpOffset(contextMenuPos.x.toDp(), (contextMenuPos.y - (maxHeightPx * 0.95f)).toDp()) }
                                     ) {
-                                        Icon(imageVector = if (viewModel.activeAudioUri == audio.uri && viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                                        if (!viewModel.isSelectionEmpty) {
+                                            DropdownMenuItem(
+                                                text = { Text("Copy") },
+                                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                                                onClick = { viewModel.copySelection(); showContextMenu = false }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Duplicate") },
+                                                leadingIcon = { Icon(Icons.Default.ContentPasteGo, contentDescription = null) },
+                                                onClick = { viewModel.duplicateSelection(); showContextMenu = false }
+                                            )
+                                        }
+                                        if (!viewModel.isClipboardEmpty) {
+                                            DropdownMenuItem(
+                                                text = { Text("Paste") },
+                                                leadingIcon = { Icon(Icons.Default.ContentPaste, contentDescription = null) },
+                                                onClick = { viewModel.pasteSelection(index, contextMenuPos.x, contextMenuPos.y); showContextMenu = false }
+                                            )
+                                        }
+                                        if (!viewModel.isSelectionEmpty) {
+                                            HorizontalDivider()
+                                            DropdownMenuItem(
+                                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                                leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                                onClick = { viewModel.deleteSelection(); showContextMenu = false }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                page.audioData.forEach { audio ->
+                                    key(audio.id) {
+                                        val virtualWidth = 1080f
+                                        val pageActualWidthPx = (maxHeightPx * 0.95f) / 1.414f
+                                        val pageScale = pageActualWidthPx / virtualWidth
+                                        
+                                        var audioOffset by remember(audio.id) { mutableStateOf(Offset(audio.x * pageScale, audio.y * pageScale)) }
+                                        val isActive = viewModel.activeAudioId == audio.id
+                                        Box(
+                                            modifier = Modifier
+                                                .offset(x = with(LocalDensity.current) { (audio.x * pageScale).toDp() }, y = with(LocalDensity.current) { (audio.y * pageScale).toDp() })
+                                                .size(48.dp).clip(CircleShape)
+                                                .background(if (isActive && viewModel.isPlaying) Color.Red.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f))
+                                                .border(if (isActive) 2.dp else 0.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                                .pointerInput(audio.id) {
+                                                    detectDragGestures(
+                                                        onDragEnd = { 
+                                                            viewModel.updateAudioPosition(index, audio.id, audioOffset.x / pageScale, audioOffset.y / pageScale) 
+                                                        }
+                                                    ) { change, dragAmount ->
+                                                        change.consume()
+                                                        audioOffset += dragAmount
+                                                    }
+                                                }
+                                                .pointerInput(audio.id) {
+                                                    detectTapGestures(
+                                                        onTap = { viewModel.playAudio(audio.uri, audio.id, index) }
+                                                    )
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(imageVector = if (isActive && viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                                        }
                                     }
                                 }
                             }
@@ -441,7 +667,31 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                         LazyColumn(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                             items(viewModel.currentPages.size) { index ->
                                 val isSelected = index == viewModel.activePageIndex; val yOffset = if (draggedItem == index) dragOffset else 0f; var showPageMenu by remember { mutableStateOf(false) }
-                                Box(modifier = Modifier.padding(vertical = 8.dp).zIndex(if (draggedItem == index) 1f else 0f).graphicsLayer(translationY = yOffset).pointerInput(Unit) { detectDragGesturesAfterLongPress(onDragStart = { draggedItem = index; dragOffset = 0f }, onDragEnd = { val targetIndex = (index + (dragOffset / 200f).toInt()).coerceIn(0, viewModel.currentPages.size - 1); viewModel.movePage(index, targetIndex); draggedItem = null; dragOffset = 0f }, onDrag = { _, dragAmount -> dragOffset += dragAmount.y }) }) {
+                                Box(modifier = Modifier
+                                    .padding(vertical = 8.dp)
+                                    .zIndex(if (draggedItem == index) 1f else 0f)
+                                    .graphicsLayer(translationY = yOffset)
+                                    .pointerInput(Unit) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { draggedItem = index; dragOffset = 0f },
+                                            onDragEnd = {
+                                                val targetIndex = (index + (dragOffset / 200f).toInt()).coerceIn(0, viewModel.currentPages.size - 1)
+                                                viewModel.movePage(index, targetIndex)
+                                                draggedItem = null
+                                                dragOffset = 0f
+                                            },
+                                            onDrag = { _, dragAmount -> dragOffset += dragAmount.y }
+                                        )
+                                    }
+                                    .clickable {
+                                        if (viewModel.selectionPageIndex != -1 && viewModel.selectionPageIndex != index) {
+                                            viewModel.dropSelectionToPage(index)
+                                            coroutineScope.launch { listState.animateScrollToItem(index) }
+                                        } else {
+                                            coroutineScope.launch { listState.animateScrollToItem(index) }
+                                        }
+                                    }
+                                ) {
                                     Box(modifier = Modifier.size(width = 60.dp, height = 80.dp).clip(RoundedCornerShape(8.dp)).background(if (viewModel.currentPages[index].canvasColor == -1) Color.White else Color(viewModel.currentPages[index].canvasColor)).border(width = if (isSelected) 3.dp else 1.dp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, shape = RoundedCornerShape(8.dp)).clickable { coroutineScope.launch { listState.animateScrollToItem(index) } }, contentAlignment = Alignment.Center) { PaperTemplate(style = viewModel.currentPages[index].paperStyle, modifier = Modifier.fillMaxSize()); Text("${index + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }
                                     Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
                                         IconButton(onClick = { showPageMenu = true }, modifier = Modifier.size(24.dp).background(MaterialTheme.colorScheme.surface.copy(alpha=0.8f), CircleShape)) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu", modifier = Modifier.size(16.dp)) }
@@ -456,21 +706,59 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             }
 
             AnimatedVisibility(
-                visible = viewModel.isRecording || viewModel.isPlaying,
+                visible = viewModel.isPlaying || viewModel.isRecording,
                 enter = expandVertically(), exit = shrinkVertically(),
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 80.dp).zIndex(15f)
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp).zIndex(20f)
             ) {
-                Row(
-                    modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(imageVector = if (viewModel.isRecording) Icons.Default.Mic else Icons.Default.PlayArrow, contentDescription = null, tint = if (viewModel.isRecording) Color.Red else MaterialTheme.colorScheme.onSecondaryContainer)
-                    Text(text = if (viewModel.isRecording) { val s = (viewModel.recordingDuration / 1000) % 60; val m = (viewModel.recordingDuration / (1000 * 60)) % 60; String.format("%02d:%02d", m, s) } else "Playing...", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                     if (viewModel.isRecording) {
-                        IconButton(onClick = { viewModel.stopRecording() }) { Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.Red) }
-                        IconButton(onClick = { viewModel.cancelRecording() }) { Icon(Icons.Default.Close, contentDescription = "Cancel") }
-                    } else {
-                        IconButton(onClick = { viewModel.stopAudio() }) { Icon(Icons.Default.Stop, contentDescription = "Stop") }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(Icons.Default.Mic, contentDescription = null, tint = Color.Red)
+                            val s = (viewModel.recordingDuration / 1000) % 60
+                            val m = (viewModel.recordingDuration / (1000 * 60)) % 60
+                            Text(
+                                text = String.format(Locale.getDefault(), "%02d:%02d", m, s),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            IconButton(onClick = { viewModel.stopRecording() }) { Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.Red) }
+                            IconButton(onClick = { viewModel.cancelRecording() }) { Icon(Icons.Default.Close, contentDescription = "Cancel") }
+                        }
+                    }
+else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            IconButton(onClick = { if (viewModel.isPlaying) viewModel.pauseAudio() else viewModel.resumeAudio() }) {
+                                Icon(if (viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                AudioPlayerSlider(
+                                    progress = viewModel.playbackProgress,
+                                    isPlaying = viewModel.isPlaying,
+                                    onProgressChange = { viewModel.seekAudio(it) }
+                                )
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    val currentS = (viewModel.playbackProgress * viewModel.currentAudioDuration / 1000).toLong() % 60
+                                    val currentM = (viewModel.playbackProgress * viewModel.currentAudioDuration / (1000 * 60)).toLong() % 60
+                                    val totalS = (viewModel.currentAudioDuration / 1000) % 60
+                                    val totalM = (viewModel.currentAudioDuration / (1000 * 60)) % 60
+                                    Text(String.format(Locale.getDefault(), "%02d:%02d", currentM, currentS), style = MaterialTheme.typography.labelSmall)
+                                    Text(String.format(Locale.getDefault(), "%02d:%02d", totalM, totalS), style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            IconButton(onClick = { viewModel.deleteAudioNote(viewModel.activeAudioPageIndex, viewModel.activeAudioId ?: "") }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                            }
+                            IconButton(onClick = { viewModel.stopAudio() }) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                        }
                     }
                 }
             }
@@ -478,20 +766,40 @@ fun DrawingScreen(viewModel: NotesViewModel) {
             Row(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp, start = 16.dp, end = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     ExpressiveIconButton(
-                        icon = Icons.Filled.ArrowBack,
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        onClick = { viewModel.closeEditing() }
+                        onClick = { viewModel.navigateBack() }
                     )
-                    TextField(value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it }, modifier = Modifier.width(150.dp), singleLine = true, colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface))
+                    TextField(value = viewModel.currentTitle, onValueChange = { viewModel.currentTitle = it }, modifier = Modifier.width(if (isSmallScreen) 100.dp else 150.dp), singleLine = true, colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent), textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface))
                 }
 
-                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Spacer(modifier = Modifier.width(8.dp))
+
+                val topBarScrollState = rememberScrollState()
+                Row(modifier = Modifier.weight(1f).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.horizontalScroll(topBarScrollState).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (!viewModel.isCurrentNoteInfinite) {
                         ExpressiveIconButton(
                             icon = Icons.Filled.Layers,
                             contentDescription = "Pages",
                             onClick = { showPagesPanel = !showPagesPanel },
                             contentColor = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        ExpressiveIconButton(
+                            icon = if (showBottomBar) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                            contentDescription = "Toggle Toolbar",
+                            onClick = { showBottomBar = !showBottomBar },
+                            contentColor = if (showBottomBar) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
+                        Spacer(modifier = Modifier.width(4.dp))
+                    } else {
+                        ExpressiveIconButton(
+                            icon = if (showBottomBar) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                            contentDescription = "Toggle Toolbar",
+                            onClick = { showBottomBar = !showBottomBar },
+                            contentColor = if (showBottomBar) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
@@ -505,8 +813,14 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     )
 
                     Box {
+                        val paperIcon = when (if (viewModel.currentPages.isNotEmpty()) viewModel.currentPages[viewModel.activePageIndex].paperStyle else 0) {
+                            1 -> Icons.Filled.ViewHeadline
+                            2 -> Icons.Filled.GridOn
+                            3 -> Icons.Filled.Grain
+                            else -> Icons.Filled.CheckBoxOutlineBlank
+                        }
                         ExpressiveIconButton(
-                            icon = Icons.Filled.GridOn,
+                            icon = paperIcon,
                             contentDescription = "Paper Style",
                             onClick = { showPaperMenu = true }
                         )
@@ -547,12 +861,12 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     }
 
                     ExpressiveIconButton(
-                        icon = Icons.Filled.Undo,
+                        icon = Icons.AutoMirrored.Filled.Undo,
                         contentDescription = "Undo",
                         onClick = { viewModel.undo() }
                     )
                     ExpressiveIconButton(
-                        icon = Icons.Filled.Redo,
+                        icon = Icons.AutoMirrored.Filled.Redo,
                         contentDescription = "Redo",
                         onClick = { viewModel.redo() }
                     )
@@ -564,33 +878,134 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                             onClick = { showExportMenu = true }
                         )
                         DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
-                            DropdownMenuItem(text = { Text("Export Note as PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
+                            DropdownMenuItem(text = { Text("Export as PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
+                            DropdownMenuItem(text = { Text("Export as Pixel Note", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; pxNoteExportLauncher.launch("${viewModel.currentTitle}.pxnote") })
                             if (!viewModel.isCurrentNoteInfinite) { DropdownMenuItem(text = { Text("Export Current Page", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.InsertPageBreak, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; singlePageToExport = viewModel.currentPages[viewModel.activePageIndex]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${viewModel.activePageIndex + 1}.pdf") }) }
                         }
                     }
                 }
             }
 
-            Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
-                    Row(modifier = Modifier.padding(bottom = 16.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).pointerInput(Unit){}.padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) { colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }; Spacer(modifier = Modifier.width(8.dp)); Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(100.dp)); IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
-                        else if (viewModel.currentTool == DrawingTool.ERASER) { Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }; Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }; if (viewModel.eraserType == 0) { Spacer(modifier = Modifier.width(8.dp)); Text("${(viewModel.currentEraserWidth / 100f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Slider(value = viewModel.currentEraserWidth, onValueChange = { viewModel.currentEraserWidth = it }, valueRange = 10f..100f, modifier = Modifier.width(100.dp)) }; IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
-                        else if (viewModel.currentTool == DrawingTool.SELECTION) { if (viewModel.selectedStrokes.isNotEmpty() || viewModel.selectedTexts.isNotEmpty()) { colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = 1.dp, color = Color.Transparent, shape = CircleShape).clickable { viewModel.changeSelectionColor(color.toArgb()) }) }; Spacer(modifier = Modifier.width(8.dp)); IconButton(onClick = { viewModel.deleteSelection() }) { Icon(Icons.Filled.DeleteSweep, contentDescription = "Delete Selection", tint = MaterialTheme.colorScheme.error) } } else { Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Free Form", color = if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }; Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Rectangle", color = if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) } }; IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
-                        else if (viewModel.currentTool == DrawingTool.TEXT) { var fontMenuExpanded by remember { mutableStateOf(false) }; Box { Text(text = viewModel.currentFontName, modifier = Modifier.clickable { fontMenuExpanded = true }.padding(8.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); DropdownMenu(expanded = fontMenuExpanded, onDismissRequest = { fontMenuExpanded = false }) { DropdownMenuItem(text = { Text("Default") }, onClick = { viewModel.currentFontName = "Default"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Serif") }, onClick = { viewModel.currentFontName = "Serif"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Monospace") }, onClick = { viewModel.currentFontName = "Monospace"; fontMenuExpanded = false }); DropdownMenuItem(text = { Text("Cursive") }, onClick = { viewModel.currentFontName = "Cursive"; fontMenuExpanded = false }); customFonts.forEach { font -> DropdownMenuItem(text = { Text(font.name) }, onClick = { viewModel.currentFontName = font.name; fontMenuExpanded = false }) }; DropdownMenuItem(text = { Text("+ Manage Fonts", color = MaterialTheme.colorScheme.primary) }, onClick = { fontMenuExpanded = false; viewModel.closeEditing(); viewModel.currentScreen = 2 }) } }; Spacer(modifier = Modifier.width(8.dp)); colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }; Spacer(modifier = Modifier.width(8.dp)); Text("${viewModel.currentTextSize.toInt()}px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface); Slider(value = viewModel.currentTextSize, onValueChange = { viewModel.currentTextSize = it }, valueRange = 10f..150f, modifier = Modifier.width(100.dp)); IconButton(onClick = { showToolOptions = false }) { Icon(Icons.Filled.Close, contentDescription = null) } }
+            AnimatedVisibility(
+                visible = showBottomBar,
+                enter = expandVertically(expandFrom = Alignment.Bottom) + slideInVertically(initialOffsetY = { it }),
+                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + slideOutVertically(targetOffsetY = { it }),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).zIndex(5f)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
+                        Row(modifier = Modifier.padding(bottom = 16.dp).widthIn(max = screenWidth.dp - 32.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).pointerInput(Unit){}.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val optionsScrollState = rememberScrollState()
+                            Row(modifier = Modifier.weight(1f, fill = false).horizontalScroll(optionsScrollState).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) {
+                                    colors.forEach { color ->
+                                        Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color })
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                    Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(100.dp))
+                                }
+                                else if (viewModel.currentTool == DrawingTool.ERASER) {
+                                    Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                    Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                    if (viewModel.eraserType == 0) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("${(viewModel.currentEraserWidth / 100f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        Slider(value = viewModel.currentEraserWidth, onValueChange = { viewModel.currentEraserWidth = it }, valueRange = 10f..100f, modifier = Modifier.width(100.dp))
+                                    }
+                                }
+                                else if (viewModel.currentTool == DrawingTool.SELECTION) {
+                                    if (viewModel.selectedStrokes.isNotEmpty() || viewModel.selectedTexts.isNotEmpty()) {
+                                        colors.forEach { color ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(CircleShape)
+                                                    .background(color)
+                                                    .border(width = 1.dp, color = Color.Transparent, shape = CircleShape)
+                                                    .clickable { viewModel.changeSelectionColor(color.toArgb()) }
+                                            )
+                                        }
+                                        
+                                        if (viewModel.selectedTexts.isNotEmpty()) {
+                                            IconButton(onClick = { 
+                                                val textToEdit = viewModel.selectedTexts.first()
+                                                textEditPageIndex = viewModel.selectionPageIndex
+                                                editingTextData = textToEdit
+                                                currentTextInput = textToEdit.text
+                                                selectedFontName = textToEdit.fontName
+                                                isTextEditing = true
+                                            }) {
+                                                Icon(Icons.Filled.Edit, contentDescription = "Edit Selected Text")
+                                            }
+
+                                            var showFontMenu by remember { mutableStateOf(false) }
+                                            Box {
+                                                IconButton(onClick = { showFontMenu = true }) {
+                                                    Icon(Icons.Filled.Title, contentDescription = "Change Selection Font")
+                                                }
+                                                DropdownMenu(expanded = showFontMenu, onDismissRequest = { showFontMenu = false }) {
+                                                    val allFontNames = listOf("Default", "Serif", "Monospace", "Cursive") + customFonts.map { it.name }
+                                                    allFontNames.forEach { fontName ->
+                                                        DropdownMenuItem(
+                                                            text = { 
+                                                                val fontInfo = customFonts.find { it.name == fontName }
+                                                                val tf = com.midknight.pixelnotes.domain.TypefaceManager.getTypeface(context, fontName, fontInfo?.fileName)
+                                                                Text(fontName, fontFamily = FontFamily(tf)) 
+                                                            },
+                                                            onClick = {
+                                                                viewModel.changeSelectionFont(fontName)
+                                                                showFontMenu = false
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        IconButton(onClick = { viewModel.deleteSelection() }) {
+                                            Icon(Icons.Filled.DeleteSweep, contentDescription = "Delete Selection", tint = MaterialTheme.colorScheme.error)
+                                        }
+                                    } else {
+                                        Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Free Form", color = if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                        Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Rectangle", color = if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                    }
+                                }
+                                else if (viewModel.currentTool == DrawingTool.TEXT) {
+                                    var fontMenuExpanded by remember { mutableStateOf(false) }
+                                    Box { 
+                                        Text(text = viewModel.currentFontName, modifier = Modifier.clickable { fontMenuExpanded = true }.padding(8.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        DropdownMenu(expanded = fontMenuExpanded, onDismissRequest = { fontMenuExpanded = false }) { 
+                                            DropdownMenuItem(text = { Text("Default") }, onClick = { viewModel.currentFontName = "Default"; fontMenuExpanded = false })
+                                            DropdownMenuItem(text = { Text("Serif") }, onClick = { viewModel.currentFontName = "Serif"; fontMenuExpanded = false })
+                                            DropdownMenuItem(text = { Text("Monospace") }, onClick = { viewModel.currentFontName = "Monospace"; fontMenuExpanded = false })
+                                            DropdownMenuItem(text = { Text("Cursive") }, onClick = { viewModel.currentFontName = "Cursive"; fontMenuExpanded = false })
+                                            customFonts.forEach { font -> DropdownMenuItem(text = { Text(font.name) }, onClick = { viewModel.currentFontName = font.name; fontMenuExpanded = false }) }
+                                            DropdownMenuItem(text = { Text("+ Manage Fonts", color = MaterialTheme.colorScheme.primary) }, onClick = { fontMenuExpanded = false; viewModel.closeEditing(); viewModel.currentScreen = 2 }) 
+                                        } 
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("${viewModel.currentTextSize.toInt()}px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                    Slider(value = viewModel.currentTextSize, onValueChange = { viewModel.currentTextSize = it }, valueRange = 10f..150f, modifier = Modifier.width(100.dp))
+                                }
+                            }
+                            IconButton(onClick = { showToolOptions = false }, modifier = Modifier.padding(end = 8.dp)) { Icon(Icons.Filled.Close, contentDescription = null) }
+                        }
                     }
-                }
-                Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val tools = listOf(DrawingTool.PEN to Icons.Filled.Edit, DrawingTool.HIGHLIGHTER to Icons.Filled.BorderColor, DrawingTool.ERASER to Icons.Filled.LayersClear, DrawingTool.TEXT to Icons.Filled.Title, DrawingTool.SELECTION to Icons.Filled.HighlightAlt)
-                    tools.forEach { (tool, icon) -> 
-                        val isSelected = viewModel.currentTool == tool
-                        ExpressiveIconButton(
-                            icon = icon,
-                            contentDescription = null,
-                            onClick = { if (isSelected) showToolOptions = !showToolOptions else { viewModel.setTool(tool); showToolOptions = true } },
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                        )
+                    Row(modifier = Modifier.clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val tools = listOf(DrawingTool.PEN to Icons.Filled.Edit, DrawingTool.HIGHLIGHTER to Icons.Filled.BorderColor, DrawingTool.ERASER to Icons.Filled.LayersClear, DrawingTool.TEXT to Icons.Filled.Title, DrawingTool.SELECTION to Icons.Filled.HighlightAlt)
+                        tools.forEach { (tool, icon) -> 
+                            val isSelected = viewModel.currentTool == tool
+                            ExpressiveIconButton(
+                                icon = icon,
+                                contentDescription = null,
+                                onClick = { if (isSelected) showToolOptions = !showToolOptions else { viewModel.setTool(tool); showToolOptions = true } },
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }

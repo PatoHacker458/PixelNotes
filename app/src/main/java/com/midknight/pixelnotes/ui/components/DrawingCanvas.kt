@@ -81,8 +81,8 @@ fun getSelectionBounds(strokes: List<StrokeData>, texts: List<TextData>, images:
 
 @Composable
 fun DrawingCanvas(
-    pageIndex: Int, isInfiniteCanvas: Boolean, cameraResetTrigger: Int, strokes: List<StrokeData>, selectedStrokes: List<StrokeData>, texts: List<TextData>, selectedTexts: List<TextData>, images: List<ImageData>, selectedImages: List<ImageData>, customFonts: List<CustomFont>, isSelectionActiveOnPage: Boolean, selectionMode: Int, currentColor: Color, currentStrokeWidth: Float, currentTool: DrawingTool, eraserType: Int, fingerDrawingEnabled: Boolean,
-    onStrokeAdd: (StrokeData) -> Unit, onStrokeRemove: (StrokeData) -> Unit, onTextToolTap: (Float, Float) -> Unit, onTextEdit: (TextData) -> Unit, onProcessSelection: (List<PointData>) -> Unit, onMoveSelection: (Float, Float) -> Unit, onScaleSelection: (Float, Float, Float) -> Unit, onCommitSelection: () -> Unit, modifier: Modifier = Modifier
+    pageIndex: Int, isInfiniteCanvas: Boolean, cameraResetTrigger: Int, cameraPan: Offset, cameraZoom: Float, strokes: List<StrokeData>, selectedStrokes: List<StrokeData>, texts: List<TextData>, selectedTexts: List<TextData>, images: List<ImageData>, selectedImages: List<ImageData>, customFonts: List<CustomFont>, isSelectionActiveOnPage: Boolean, isClipboardEmpty: Boolean, selectionMode: Int, currentColor: Color, currentStrokeWidth: Float, currentTool: DrawingTool, eraserType: Int, fingerDrawingEnabled: Boolean,
+    onStrokeAdd: (StrokeData) -> Unit, onStrokeRemove: (StrokeData) -> Unit, onTextToolTap: (Float, Float) -> Unit, onTextEdit: (TextData) -> Unit, onProcessSelection: (List<PointData>) -> Unit, onMoveSelection: (Float, Float) -> Unit, onScaleSelection: (Float, Float, Float) -> Unit, onCommitSelection: () -> Unit, onSelectionLongPress: (Offset) -> Unit, onCameraChange: (Offset, Float) -> Unit, modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var currentPath by remember { mutableStateOf<Path?>(null) }
@@ -92,22 +92,37 @@ fun DrawingCanvas(
     var trigger by remember { mutableIntStateOf(0) }
     var currentIsEraser by remember { mutableStateOf(false) }
 
-    var cameraPan by remember { mutableStateOf(Offset.Zero) }
-    var cameraZoom by remember { mutableFloatStateOf(1f) }
     var processedResetTrigger by remember { mutableIntStateOf(0) }
 
-    val updatedColor by rememberUpdatedState(currentColor); val updatedStrokeWidth by rememberUpdatedState(currentStrokeWidth); val updatedTool by rememberUpdatedState(currentTool); val updatedEraserType by rememberUpdatedState(eraserType); val updatedFingerDrawingEnabled by rememberUpdatedState(fingerDrawingEnabled); val updatedStrokes by rememberUpdatedState(strokes); val updatedSelectedStrokes by rememberUpdatedState(selectedStrokes); val updatedSelectedTexts by rememberUpdatedState(selectedTexts); val updatedSelectedImages by rememberUpdatedState(selectedImages); val updatedIsSelectionActive by rememberUpdatedState(isSelectionActiveOnPage); val updatedSelectionMode by rememberUpdatedState(selectionMode)
+    val updatedColor by rememberUpdatedState(currentColor); val updatedStrokeWidth by rememberUpdatedState(currentStrokeWidth); val updatedTool by rememberUpdatedState(currentTool); val updatedEraserType by rememberUpdatedState(eraserType); val updatedFingerDrawingEnabled by rememberUpdatedState(fingerDrawingEnabled); val updatedStrokes by rememberUpdatedState(strokes); val updatedSelectedStrokes by rememberUpdatedState(selectedStrokes); val updatedSelectedTexts by rememberUpdatedState(selectedTexts); val updatedSelectedImages by rememberUpdatedState(selectedImages); val updatedIsSelectionActive by rememberUpdatedState(isSelectionActiveOnPage)
+    val updatedIsClipboardEmpty by rememberUpdatedState(isClipboardEmpty)
+    val updatedSelectionMode by rememberUpdatedState(selectionMode)
+    val updatedCameraZoom by rememberUpdatedState(cameraZoom)
+    val updatedCameraPan by rememberUpdatedState(cameraPan)
 
-    val baseImagePainters = images.map { it to rememberAsyncImagePainter(it.uri) }
-    val selectedImagePainters = selectedImages.map { it to rememberAsyncImagePainter(it.uri) }
+    val resolveUri = { uri: String ->
+        if (uri.startsWith("internal://")) {
+            val fileName = uri.removePrefix("internal://")
+            java.io.File(context.filesDir, "inserted_images/$fileName").absolutePath
+        } else if (uri.contains("inserted_images/")) {
+            // Legacy fix: convert absolute path to current device's absolute path
+            val fileName = uri.substringAfterLast("/")
+            java.io.File(context.filesDir, "inserted_images/$fileName").absolutePath
+        } else {
+            uri
+        }
+    }
 
-    Canvas(modifier = modifier.fillMaxSize().pointerInput(texts, selectedTexts, cameraZoom, cameraPan) {
+    val baseImagePainters = images.map { it to rememberAsyncImagePainter(resolveUri(it.uri)) }
+    val selectedImagePainters = selectedImages.map { it to rememberAsyncImagePainter(resolveUri(it.uri)) }
+
+    Canvas(modifier = modifier.fillMaxSize().pointerInput(texts, selectedTexts) {
         val virtualWidth = 1080f; var stylusModeActive = false
         awaitEachGesture {
             val down = awaitFirstDown()
             
-            val currentEffectiveScale = (size.width / virtualWidth) * cameraZoom
-            val toVirtual = { x: Float, y: Float -> PointData((x - cameraPan.x) / currentEffectiveScale, (y - cameraPan.y) / currentEffectiveScale) }
+            val currentEffectiveScale = (size.width / virtualWidth) * updatedCameraZoom
+            val toVirtual = { x: Float, y: Float -> PointData((x - updatedCameraPan.x) / currentEffectiveScale, (y - updatedCameraPan.y) / currentEffectiveScale) }
 
             // Handle double-tap for text editing
             val now = System.currentTimeMillis()
@@ -146,15 +161,44 @@ fun DrawingCanvas(
             if (isStylusOrEraser) stylusModeActive = true
             val isAllowedTouch = if (updatedFingerDrawingEnabled) { !stylusModeActive || isStylusOrEraser } else { isStylusOrEraser }
 
-            if (updatedTool == DrawingTool.TEXT && isAllowedTouch) { val v = toVirtual(down.position.x, down.position.y); onTextToolTap(v.x, v.y); return@awaitEachGesture }
+            if (updatedTool == DrawingTool.TEXT && isAllowedTouch) {
+                var isZooming = false
+                var hasMoved = false
+                val startPos = down.position
+                do {
+                    val event = awaitPointerEvent()
+                    if (event.changes.size > 1 && isInfiniteCanvas) {
+                        isZooming = true
+                        val zoomChange = event.calculateZoom(); val panChange = event.calculatePan(); val centroid = event.calculateCentroid(useCurrent = false); val oldZoom = updatedCameraZoom
+                        val newZoom = (updatedCameraZoom * zoomChange).coerceIn(0.1f, 50f)
+                        var newPan = updatedCameraPan + panChange
+                        newPan = newPan + (centroid - updatedCameraPan) - (centroid - updatedCameraPan) * (newZoom / oldZoom)
+                        onCameraChange(newPan, newZoom)
+                        event.changes.forEach { if (it.positionChanged()) it.consume() }; trigger++
+                    } else if (!isZooming) {
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change != null) {
+                            if (kotlin.math.hypot(change.position.x - startPos.x, change.position.y - startPos.y) > 10f) hasMoved = true
+                            if (change.pressed) change.consume()
+                        }
+                    }
+                } while (event.changes.any { it.pressed })
+                
+                if (!isZooming && !hasMoved) {
+                    val v = toVirtual(down.position.x, down.position.y)
+                    onTextToolTap(v.x, v.y)
+                }
+                return@awaitEachGesture
+            }
 
             if (updatedTool == DrawingTool.SELECTION && isAllowedTouch) {
                 val tv = toVirtual(down.position.x, down.position.y); val touchX = tv.x; val touchY = tv.y
                 val bounds = getSelectionBounds(updatedSelectedStrokes, updatedSelectedTexts, updatedSelectedImages)
+                var isZooming = false
 
                 if (updatedIsSelectionActive && bounds.width > 0f) {
                     val pad = 20f; val left = bounds.left - pad; val top = bounds.top - pad; val right = bounds.right + pad; val bottom = bounds.bottom + pad
-                    val hitRadius = 80f / cameraZoom
+                    val hitRadius = 80f / updatedCameraZoom
                     fun dist(x1: Float, y1: Float, x2: Float, y2: Float) = kotlin.math.hypot(x2 - x1, y2 - y1)
                     val isTL = dist(touchX, touchY, left, top) < hitRadius; val isTR = dist(touchX, touchY, right, top) < hitRadius; val isBL = dist(touchX, touchY, left, bottom) < hitRadius; val isBR = dist(touchX, touchY, right, bottom) < hitRadius
 
@@ -162,12 +206,22 @@ fun DrawingCanvas(
                         val pivotX = if (isTL || isBL) right else left; val pivotY = if (isTL || isTR) bottom else top; var prevDist = dist(pivotX, pivotY, touchX, touchY)
                         do {
                             val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change != null && change.pressed) {
-                                change.consume()
-                                val cv = toVirtual(change.position.x, change.position.y)
-                                val currDist = dist(pivotX, pivotY, cv.x, cv.y); val scale = currDist / prevDist
-                                if (scale > 0.1f && scale < 5f) { onScaleSelection(scale, pivotX, pivotY); prevDist = currDist }
+                            if (event.changes.size > 1 && isInfiniteCanvas) {
+                                isZooming = true
+                                val zoomChange = event.calculateZoom(); val panChange = event.calculatePan(); val centroid = event.calculateCentroid(useCurrent = false); val oldZoom = updatedCameraZoom
+                                val newZoom = (updatedCameraZoom * zoomChange).coerceIn(0.1f, 50f)
+                                var newPan = updatedCameraPan + panChange
+                                newPan = newPan + (centroid - updatedCameraPan) - (centroid - updatedCameraPan) * (newZoom / oldZoom)
+                                onCameraChange(newPan, newZoom)
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }; trigger++
+                            } else if (!isZooming) {
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                if (change != null && change.pressed) {
+                                    change.consume()
+                                    val cv = toVirtual(change.position.x, change.position.y)
+                                    val currDist = dist(pivotX, pivotY, cv.x, cv.y); val scale = currDist / prevDist
+                                    if (scale > 0.1f && scale < 5f) { onScaleSelection(scale, pivotX, pivotY); prevDist = currDist }
+                                }
                             }
                         } while (event.changes.any { it.pressed })
                         return@awaitEachGesture
@@ -175,21 +229,78 @@ fun DrawingCanvas(
                     val isInside = touchX >= left - 40f && touchX <= right + 40f && touchY >= top - 40f && touchY <= bottom + 40f
                     if (isInside) {
                         var prevTx = touchX; var prevTy = touchY
+                        var dragStarted = false
                         do {
-                            val event = awaitPointerEvent(); val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change != null && change.pressed) { change.consume(); val cv = toVirtual(change.position.x, change.position.y); onMoveSelection(cv.x - prevTx, cv.y - prevTy); prevTx = cv.x; prevTy = cv.y }
-                        } while (event.changes.any { it.pressed })
+                            val event = withTimeoutOrNull(400) { awaitPointerEvent() }
+                            if (event == null && !dragStarted) {
+                                // Long press detected inside selection
+                                onSelectionLongPress(down.position)
+                                return@awaitEachGesture
+                            } else if (event != null) {
+                                if (event.changes.size > 1 && isInfiniteCanvas) {
+                                    isZooming = true
+                                    val zoomChange = event.calculateZoom(); val panChange = event.calculatePan(); val centroid = event.calculateCentroid(useCurrent = false); val oldZoom = updatedCameraZoom
+                                    val newZoom = (updatedCameraZoom * zoomChange).coerceIn(0.1f, 50f)
+                                    var newPan = updatedCameraPan + panChange
+                                    newPan = newPan + (centroid - updatedCameraPan) - (centroid - updatedCameraPan) * (newZoom / oldZoom)
+                                    onCameraChange(newPan, newZoom)
+                                    event.changes.forEach { if (it.positionChanged()) it.consume() }; trigger++
+                                } else if (!isZooming) {
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change != null && change.pressed) {
+                                        val cv = toVirtual(change.position.x, change.position.y)
+                                        if (kotlin.math.hypot(cv.x - touchX, cv.y - touchY) > 5f) dragStarted = true
+                                        if (dragStarted) {
+                                            change.consume()
+                                            onMoveSelection(cv.x - prevTx, cv.y - prevTy)
+                                            prevTx = cv.x; prevTy = cv.y
+                                        }
+                                    }
+                                }
+                            }
+                        } while (event == null || event.changes.any { it.pressed })
                         return@awaitEachGesture
                     }
                 }
                 onCommitSelection()
+                // Check for long press on empty canvas to paste
+                var dragStarted = false
                 val path = Path().apply { moveTo(touchX, touchY) }; val points = mutableListOf(PointData(touchX, touchY, 1f)); currentPath = path; currentPoints = points; var prevX = touchX; var prevY = touchY
                 do {
-                    val event = awaitPointerEvent(); val change = event.changes.firstOrNull { it.id == down.id }
-                    if (change != null && change.pressed) { change.consume(); val cv = toVirtual(change.position.x, change.position.y); path.lineTo(cv.x, cv.y); points.add(PointData(cv.x, cv.y, 1f)); prevX = cv.x; prevY = cv.y; trigger++ }
-                } while (event.changes.any { it.pressed })
-                if (updatedSelectionMode == 0 && points.size > 2) path.lineTo(points.first().x, points.first().y)
-                onProcessSelection(points.toList()); currentPath = null; currentPoints = mutableListOf()
+                    val event = withTimeoutOrNull(400) { awaitPointerEvent() }
+                    if (event == null && !dragStarted) {
+                        // Long press on empty canvas - only trigger if selection or clipboard is NOT empty
+                        if (updatedIsSelectionActive || !updatedIsClipboardEmpty) {
+                            onSelectionLongPress(down.position)
+                        }
+                        currentPath = null; currentPoints = mutableListOf()
+                        return@awaitEachGesture
+                    } else if (event != null) {
+                        if (event.changes.size > 1 && isInfiniteCanvas) {
+                            isZooming = true
+                            val zoomChange = event.calculateZoom(); val panChange = event.calculatePan(); val centroid = event.calculateCentroid(useCurrent = false); val oldZoom = updatedCameraZoom
+                            val newZoom = (updatedCameraZoom * zoomChange).coerceIn(0.1f, 50f)
+                            var newPan = updatedCameraPan + panChange
+                            newPan = newPan + (centroid - updatedCameraPan) - (centroid - updatedCameraPan) * (newZoom / oldZoom)
+                            onCameraChange(newPan, newZoom)
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }; trigger++
+                        } else if (!isZooming) {
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change != null && change.pressed) {
+                                val cv = toVirtual(change.position.x, change.position.y)
+                                if (kotlin.math.hypot(cv.x - touchX, cv.y - touchY) > 5f) dragStarted = true
+                                if (dragStarted) {
+                                    change.consume(); path.lineTo(cv.x, cv.y); points.add(PointData(cv.x, cv.y, 1f)); prevX = cv.x; prevY = cv.y; trigger++
+                                }
+                            }
+                        }
+                    }
+                } while (event == null || event.changes.any { it.pressed })
+                if (!isZooming && dragStarted) {
+                    if (updatedSelectionMode == 0 && points.size > 2) path.lineTo(points.first().x, points.first().y)
+                    onProcessSelection(points.toList())
+                }
+                currentPath = null; currentPoints = mutableListOf()
                 return@awaitEachGesture
             }
 
@@ -198,9 +309,21 @@ fun DrawingCanvas(
             currentIsEraser = activeEraser
 
             if (activeEraser && updatedEraserType == 1 && isAllowedTouch) {
+                var isZooming = false
                 do {
-                    val event = awaitPointerEvent(); val change = event.changes.firstOrNull { it.id == down.id }
-                    if (change != null && change.pressed) { change.consume(); val cv = toVirtual(change.position.x, change.position.y); val hitRadiusSq = (2500f) / cameraZoom; updatedStrokes.toList().forEach { stroke -> if (stroke.points.any { p -> val dx = p.x - cv.x; val dy = p.y - cv.y; (dx * dx + dy * dy) < hitRadiusSq }) { onStrokeRemove(stroke) } } }
+                    val event = awaitPointerEvent()
+                    if (event.changes.size > 1 && isInfiniteCanvas) {
+                        isZooming = true
+                        val zoomChange = event.calculateZoom(); val panChange = event.calculatePan(); val centroid = event.calculateCentroid(useCurrent = false); val oldZoom = updatedCameraZoom
+                        val newZoom = (updatedCameraZoom * zoomChange).coerceIn(0.1f, 50f)
+                        var newPan = updatedCameraPan + panChange
+                        newPan = newPan + (centroid - updatedCameraPan) - (centroid - updatedCameraPan) * (newZoom / oldZoom)
+                        onCameraChange(newPan, newZoom)
+                        event.changes.forEach { if (it.positionChanged()) it.consume() }; trigger++
+                    } else if (!isZooming) {
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change != null && change.pressed) { change.consume(); val cv = toVirtual(change.position.x, change.position.y); val hitRadiusSq = (2500f) / updatedCameraZoom; updatedStrokes.toList().forEach { stroke -> if (stroke.points.any { p -> val dx = p.x - cv.x; val dy = p.y - cv.y; (dx * dx + dy * dy) < hitRadiusSq }) { onStrokeRemove(stroke) } } }
+                    }
                 } while (event.changes.any { it.pressed })
                 return@awaitEachGesture
             }
@@ -234,15 +357,12 @@ fun DrawingCanvas(
                     if (event.changes.size > 1) {
                         isZooming = true
                         if (isInfiniteCanvas) {
-                            val zoomChange = event.calculateZoom()
-                            val panChange = event.calculatePan()
-                            val centroid = event.calculateCentroid(useCurrent = false)
-                            val oldZoom = cameraZoom
-                            cameraZoom = (cameraZoom * zoomChange).coerceIn(0.1f, 50f)
-                            cameraPan = cameraPan + panChange
-                            cameraPan = cameraPan + (centroid - cameraPan) - (centroid - cameraPan) * (cameraZoom / oldZoom)
-                            event.changes.forEach { if (it.positionChanged()) it.consume() }
-                            trigger++
+                            val zoomChange = event.calculateZoom(); val panChange = event.calculatePan(); val centroid = event.calculateCentroid(useCurrent = false); val oldZoom = updatedCameraZoom
+                            val newZoom = (updatedCameraZoom * zoomChange).coerceIn(0.1f, 50f)
+                            var newPan = updatedCameraPan + panChange
+                            newPan = newPan + (centroid - updatedCameraPan) - (centroid - updatedCameraPan) * (newZoom / oldZoom)
+                            onCameraChange(newPan, newZoom)
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }; trigger++
                         }
                     } else if (!isZooming && isAllowedTouch && updatedTool != DrawingTool.TEXT) {
                         val change = event.changes.firstOrNull { it.id == down.id }
@@ -290,11 +410,12 @@ fun DrawingCanvas(
                     val targetW = bounds.width + pad * 2
                     val targetH = bounds.height + pad * 2
                     val desiredEffectiveScale = minOf(size.width / targetW, size.height / targetH)
-                    cameraZoom = (desiredEffectiveScale / (size.width / virtualWidth)).coerceIn(0.1f, 50f)
-                    val newScale = (size.width / virtualWidth) * cameraZoom
-                    cameraPan = Offset(size.width / 2f - bounds.center.x * newScale, size.height / 2f - bounds.center.y * newScale)
-                } else { cameraPan = Offset.Zero; cameraZoom = 1f }
-            } else { cameraPan = Offset.Zero; cameraZoom = 1f }
+                    val newZoom = (desiredEffectiveScale / (size.width / virtualWidth)).coerceIn(0.1f, 50f)
+                    val newScale = (size.width / virtualWidth) * newZoom
+                    val newPan = Offset(size.width / 2f - bounds.center.x * newScale, size.height / 2f - bounds.center.y * newScale)
+                    onCameraChange(newPan, newZoom)
+                } else { onCameraChange(Offset.Zero, 1f) }
+            } else { onCameraChange(Offset.Zero, 1f) }
         }
 
         withTransform({ translate(cameraPan.x, cameraPan.y); scale(scaleX = effectiveScale, scaleY = effectiveScale, pivot = Offset.Zero) }) {

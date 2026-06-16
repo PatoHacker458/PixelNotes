@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +27,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AllOut
 import androidx.compose.material.icons.filled.Backup
@@ -35,11 +39,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.DriveFileMove
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -47,9 +51,10 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,7 +86,6 @@ import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.FolderEntity
 import com.midknight.pixelnotes.data.NoteWithPages
 import com.midknight.pixelnotes.ui.components.ExpressiveButton
-import com.midknight.pixelnotes.ui.components.ExpressiveExtendedFAB
 import com.midknight.pixelnotes.ui.components.ExpressiveFAB
 import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
 import com.midknight.pixelnotes.ui.components.FolderCard
@@ -112,6 +117,11 @@ fun NotesScreen(
     onActionRestore: () -> Unit,
     onSignInClick: () -> Unit,
     onSignOutClick: () -> Unit,
+    onLocalBackup: () -> Unit,
+    onLocalRestore: () -> Unit,
+    onExportPxNote: (NoteWithPages) -> Unit,
+    onImportPxNote: () -> Unit,
+    onImportPdf: () -> Unit,
     viewModel: NotesViewModel
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -194,7 +204,10 @@ fun NotesScreen(
             onSignOut = { onSignOutClick(); showProfileDialog = false },
             onSignIn = { onSignInClick(); showProfileDialog = false },
             onBackup = { viewModel.backupToCloud(context) },
-            onRestore = { viewModel.restoreFromCloud(context) }
+            onRestore = { viewModel.restoreFromCloudManual(context) },
+            onPurge = { viewModel.purgeCloudData(context) },
+            onLocalBackup = onLocalBackup,
+            onLocalRestore = onLocalRestore
         )
     }
 
@@ -225,6 +238,22 @@ fun NotesScreen(
                 Column(horizontalAlignment = Alignment.End) {
                     AnimatedVisibility(visible = showFabMenu) {
                         Column(modifier = Modifier.padding(bottom = 16.dp), horizontalAlignment = Alignment.End) {
+                            ExpressiveIconButton(
+                                icon = Icons.Default.FileOpen,
+                                contentDescription = "Import .pxnote",
+                                onClick = { showFabMenu = false; onImportPxNote() },
+                                modifier = Modifier.padding(bottom = 8.dp),
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                size = 56.dp
+                            )
+                            ExpressiveIconButton(
+                                icon = Icons.Default.PictureAsPdf,
+                                contentDescription = "Import PDF",
+                                onClick = { showFabMenu = false; onImportPdf() },
+                                modifier = Modifier.padding(bottom = 8.dp),
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                size = 56.dp
+                            )
                             ExpressiveIconButton(
                                 icon = Icons.Default.Description,
                                 contentDescription = "A4 Note",
@@ -329,7 +358,10 @@ fun NotesScreen(
                             ExpressiveIconButton(icon = Icons.Default.Restore, contentDescription = "Restore", onClick = onActionRestore, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                             ExpressiveIconButton(icon = Icons.Default.DeleteForever, contentDescription = "Delete Permanently", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                         } else {
-                            ExpressiveIconButton(icon = Icons.Default.DriveFileMove, contentDescription = "Move", onClick = onActionMove, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            if (selectedNotes.size == 1) {
+                                ExpressiveIconButton(icon = Icons.Default.FileUpload, contentDescription = "Export .pxnote", onClick = { onExportPxNote(selectedNotes.first()) }, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            ExpressiveIconButton(icon = Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move", onClick = onActionMove, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                             ExpressiveIconButton(icon = Icons.Default.PictureAsPdf, contentDescription = "Merge PDF", onClick = onActionExport, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                             ExpressiveIconButton(icon = Icons.Default.Share, contentDescription = "Share", onClick = onActionShare, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                             ExpressiveIconButton(icon = Icons.Default.Delete, contentDescription = "Trash", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -338,31 +370,67 @@ fun NotesScreen(
                 }
             }
 
-            if (displayedFolders.isEmpty() && displayedNotes.isEmpty()) {
+                if (displayedFolders.isEmpty() && displayedNotes.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(text = if (searchQuery.isNotBlank()) "No matching results found" else "Empty folder", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 220.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(displayedFolders) { folder ->
-                        FolderCard(
-                            folder = folder,
-                            onClick = { searchQuery = ""; onFolderSelected(folder.path) },
-                            onRenameClick = { newFolderName = folder.name; folderToRename = folder },
-                            onDeleteClick = { folderToDelete = folder }
+            AnimatedContent(
+                targetState = currentFolder to searchQuery,
+                transitionSpec = {
+                    val isSearchChange = targetState.second != initialState.second
+                    if (isSearchChange) {
+                        fadeIn(tween(300)) togetherWith fadeOut(tween(300))
+                    } else {
+                        (slideInHorizontally(animationSpec = tween(400)) { width -> width } + fadeIn()).togetherWith(
+                            slideOutHorizontally(animationSpec = tween(400)) { width -> -width / 2 } + fadeOut()
                         )
                     }
-                    items(displayedNotes) { noteWP ->
-                        NoteCard(
-                            noteWithPages = noteWP,
-                            isSelected = selectedNotes.any { it.note.id == noteWP.note.id },
-                            onClick = { if (selectedNotes.isNotEmpty() || currentFolder == "Trash") onNoteLongClick(noteWP) else onNoteClick(noteWP) },
-                            onLongClick = { onNoteLongClick(noteWP) }
-                        )
+                },
+                label = "GridTransition",
+                modifier = Modifier.fillMaxSize()
+            ) { (targetFolder, targetQuery) ->
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 220.dp), 
+                    modifier = Modifier.fillMaxSize(), 
+                    contentPadding = PaddingValues(16.dp), 
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), 
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(displayedFolders, key = { it.path }) { folderItem ->
+                        var isVisible by remember(folderItem.path) { mutableStateOf(false) }
+                        LaunchedEffect(folderItem.path) { isVisible = true }
+                        
+                        AnimatedVisibility(
+                            visible = isVisible,
+                            enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.9f, animationSpec = tween(300))
+                        ) {
+                            FolderCard(
+                                folder = folderItem,
+                                onClick = { searchQuery = ""; onFolderSelected(folderItem.path) },
+                                onRenameClick = { newFolderName = folderItem.name; folderToRename = folderItem },
+                                onDeleteClick = { folderToDelete = folderItem }
+                            )
+                        }
+                    }
+                    items(displayedNotes, key = { it.note.id }) { noteWP ->
+                        var isVisible by remember(noteWP.note.id) { mutableStateOf(false) }
+                        LaunchedEffect(noteWP.note.id) { isVisible = true }
+
+                        AnimatedVisibility(
+                            visible = isVisible,
+                            enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.85f, animationSpec = tween(400))
+                        ) {
+                            NoteCard(
+                                noteWithPages = noteWP,
+                                isSelected = selectedNotes.any { it.note.id == noteWP.note.id },
+                                onClick = { if (selectedNotes.isNotEmpty() || currentFolder == "Trash") onNoteLongClick(noteWP) else onNoteClick(noteWP) },
+                                onLongClick = { onNoteLongClick(noteWP) }
+                            )
+                        }
                     }
                 }
+            }
             }
         }
     }
@@ -378,9 +446,39 @@ fun ProfileDialog(
     onSignOut: () -> Unit,
     onSignIn: () -> Unit,
     onBackup: () -> Unit,
-    onRestore: () -> Unit
+    onRestore: () -> Unit,
+    onPurge: () -> Unit,
+    onLocalBackup: () -> Unit,
+    onLocalRestore: () -> Unit
 ) {
     var localIsRestoring by remember { mutableStateOf(false) }
+    var showPurgeConfirm by remember { mutableStateOf(false) }
+
+    if (showPurgeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showPurgeConfirm = false },
+            title = { Text("Delete Cloud Data") },
+            text = { Text("Permanently delete all backups from Google Drive? This cannot be undone.") },
+            confirmButton = {
+                ExpressiveButton(
+                    text = "Delete Everything",
+                    onClick = { onPurge(); showPurgeConfirm = false },
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                    isSquareEdge = true
+                )
+            },
+            dismissButton = {
+                ExpressiveButton(
+                    text = "Cancel",
+                    onClick = { showPurgeConfirm = false },
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    isSquareEdge = true
+                )
+            }
+        )
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -464,6 +562,16 @@ fun ProfileDialog(
                     Column {
                         if (userEmail == null) {
                             ProfileDialogRow(icon = Icons.Default.GroupAdd, text = "Sign in to Pixel Notes", onClick = onSignIn)
+                            ProfileDialogRow(
+                                icon = Icons.Default.FileUpload,
+                                text = "Create Local Backup",
+                                onClick = onLocalBackup
+                            )
+                            ProfileDialogRow(
+                                icon = Icons.Default.FileDownload,
+                                text = "Restore Local Backup",
+                                onClick = onLocalRestore
+                            )
                         } else {
                             ProfileDialogRow(
                                 icon = Icons.Default.Backup, 
@@ -475,8 +583,13 @@ fun ProfileDialog(
                                 text = if (localIsRestoring) "Restoring..." else "Restore from Cloud", 
                                 onClick = { localIsRestoring = true; onRestore() }
                             )
+                            ProfileDialogRow(
+                                icon = Icons.Default.DeleteForever,
+                                text = "Delete Cloud Data",
+                                onClick = { showPurgeConfirm = true }
+                            )
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            ProfileDialogRow(icon = Icons.Default.Logout, text = "Sign out", onClick = onSignOut)
+                            ProfileDialogRow(icon = Icons.AutoMirrored.Filled.Logout, text = "Sign out", onClick = onSignOut)
                         }
                     }
                 }

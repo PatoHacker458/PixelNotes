@@ -11,10 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "com.midknight.pixelnotes"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.3.0-beta"
+        versionCode = 9
+        versionName = "1.4.0-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -63,15 +63,18 @@ dependencies {
 
     implementation("androidx.compose.material3:material3-window-size-class")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.animation:animation:1.7.0")
 
     val roomVersion = "2.6.1"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
+    
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("androidx.graphics:graphics-shapes:1.1.0")
+    implementation("ir.mahozad.multiplatform:wavy-slider-android:2.2.0")
 
     implementation("com.google.apis:google-api-services-drive:v3-rev20241027-2.0.0")
     implementation("com.google.api-client:google-api-client-android:2.9.0")

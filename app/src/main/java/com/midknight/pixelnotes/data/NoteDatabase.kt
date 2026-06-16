@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 13, exportSchema = false)
+@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 14, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class NoteDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
@@ -26,11 +26,12 @@ abstract class NoteDatabase : RoomDatabase() {
         private val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `notes` ADD COLUMN `inTrash` INTEGER NOT NULL DEFAULT 0") } }
         private val MIGRATION_11_12 = object : Migration(11, 12) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `notes` ADD COLUMN `isInfinite` INTEGER NOT NULL DEFAULT 0") } }
         private val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `pages` ADD COLUMN `audioData` TEXT NOT NULL DEFAULT '[]'") } }
+        private val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `notes` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0") } }
 
         fun getDatabase(context: Context): NoteDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(context.applicationContext, NoteDatabase::class.java, "pixel_notes_database")
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
@@ -41,6 +42,31 @@ abstract class NoteDatabase : RoomDatabase() {
         fun closeDatabase() {
             INSTANCE?.close()
             INSTANCE = null
+        }
+
+        fun checkpoint(context: Context) {
+            try {
+                val db = getDatabase(context)
+                db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").close()
+                android.util.Log.d("NoteDatabase", "Database checkpointed successfully")
+            } catch (e: Exception) {
+                android.util.Log.e("NoteDatabase", "Checkpoint failed", e)
+            }
+        }
+
+        fun createBackupSnapshot(context: Context, targetFile: java.io.File) {
+            try {
+                if (targetFile.exists()) targetFile.delete()
+                val db = getDatabase(context)
+                // VACUUM INTO creates a perfectly consistent, single-file clone of the DB
+                // that includes all uncommitted WAL changes. 
+                // This is the Gold Standard for backing up live SQLite databases.
+                db.openHelper.writableDatabase.execSQL("VACUUM INTO '${targetFile.absolutePath}'")
+                android.util.Log.d("NoteDatabase", "VACUUM INTO snapshot created: ${targetFile.absolutePath}")
+            } catch (e: Exception) {
+                android.util.Log.e("NoteDatabase", "VACUUM INTO failed", e)
+                throw e
+            }
         }
     }
 }

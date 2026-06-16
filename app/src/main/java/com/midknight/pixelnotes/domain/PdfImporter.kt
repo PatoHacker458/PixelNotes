@@ -12,7 +12,7 @@ import java.io.FileOutputStream
 class PdfImporter(private val context: Context) {
     suspend fun importPdfRealTime(uri: Uri): Pair<String, Int>? = withContext(Dispatchers.IO) {
         try {
-            val pdfDir = File(context.filesDir, "realtime_pdfs")
+            val pdfDir = File(context.filesDir, "imported_pdfs")
             if (!pdfDir.exists()) pdfDir.mkdirs()
 
             val fileName = "doc_${System.currentTimeMillis()}.pdf"

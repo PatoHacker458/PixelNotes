@@ -18,7 +18,8 @@ data class Note(
     val date: String,
     val folder: String = "General",
     val inTrash: Boolean = false,
-    val isInfinite: Boolean = false
+    val isInfinite: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "pages")

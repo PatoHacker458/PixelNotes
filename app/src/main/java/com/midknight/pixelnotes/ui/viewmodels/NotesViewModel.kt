@@ -43,6 +43,8 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     var selectedNoteWithPages by mutableStateOf<NoteWithPages?>(null)
     var isCurrentNoteInfinite by mutableStateOf(false)
     var cameraResetTrigger by mutableIntStateOf(0)
+    var cameraPan by mutableStateOf(androidx.compose.ui.geometry.Offset.Zero)
+    var cameraZoom by mutableFloatStateOf(1f)
 
     var currentTitle by mutableStateOf("New Note")
     var currentColor by mutableStateOf(Color.Black)
@@ -61,6 +63,13 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     val selectedTexts = mutableStateListOf<TextData>()
     val selectedImages = mutableStateListOf<com.midknight.pixelnotes.domain.ImageData>()
     var selectionPageIndex by mutableIntStateOf(-1)
+
+    private val clipboardStrokes = mutableListOf<StrokeData>()
+    private val clipboardTexts = mutableListOf<TextData>()
+    private val clipboardImages = mutableListOf<com.midknight.pixelnotes.domain.ImageData>()
+
+    val isSelectionEmpty get() = selectedStrokes.isEmpty() && selectedTexts.isEmpty() && selectedImages.isEmpty()
+    val isClipboardEmpty get() = clipboardStrokes.isEmpty() && clipboardTexts.isEmpty() && clipboardImages.isEmpty()
 
     val currentPages = mutableStateListOf<PageEntity>()
     var activePageIndex by mutableIntStateOf(0)
@@ -83,8 +92,13 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     private var currentRecordingFile: java.io.File? = null
     private var recordingJob: kotlinx.coroutines.Job? = null
     var isPlaying by mutableStateOf(false)
+    var playbackProgress by mutableFloatStateOf(0f)
+    var currentAudioDuration by mutableLongStateOf(0L)
     private var mediaPlayer: android.media.MediaPlayer? = null
     var activeAudioUri by mutableStateOf<String?>(null)
+    var activeAudioId by mutableStateOf<String?>(null)
+    var activeAudioPageIndex by mutableIntStateOf(-1)
+    private var playbackJob: kotlinx.coroutines.Job? = null
     var isSyncing by mutableStateOf(false)
     var userEmail by mutableStateOf<String?>(null)
     var userName by mutableStateOf<String?>(null)
@@ -92,9 +106,9 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     val isUserSignedIn get() = userEmail != null
 
     init {
-        userEmail = prefs.getString("user_email", null)
-        userName = prefs.getString("user_name", null)
-        userPhotoUri = prefs.getString("user_photo", null)
+        userEmail = prefs?.getString("user_email", null)
+        userName = prefs?.getString("user_name", null)
+        userPhotoUri = prefs?.getString("user_photo", null)
     }
 
     fun createImageUri(context: android.content.Context): android.net.Uri? {
@@ -106,11 +120,57 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     }
 
     fun addFloatingImageToPage(pageIndex: Int, uri: String) {
-        setTool(DrawingTool.SELECTION)
-        val newImage = com.midknight.pixelnotes.domain.ImageData(x = 100f, y = 100f, width = 600f, height = 600f, uri = uri)
-        selectedImages.add(newImage)
-        selectionPageIndex = pageIndex
-        activePageIndex = pageIndex
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val imagesDir = java.io.File(context.filesDir, "inserted_images")
+                if (!imagesDir.exists()) imagesDir.mkdirs()
+                
+                val sourceUri = android.net.Uri.parse(uri)
+                val fileName = "img_${System.currentTimeMillis()}.jpg"
+                val destFile = java.io.File(imagesDir, fileName)
+                
+                context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                    val originalBitmap = android.graphics.BitmapFactory.decodeStream(input)
+                    if (originalBitmap != null) {
+                        val maxDim = 2048f
+                        val scale = if (originalBitmap.width > maxDim || originalBitmap.height > maxDim) {
+                            maxDim / maxOf(originalBitmap.width, originalBitmap.height).toFloat()
+                        } else 1f
+                        
+                        val finalBitmap = if (scale < 1f) {
+                            android.graphics.Bitmap.createScaledBitmap(
+                                originalBitmap, 
+                                (originalBitmap.width * scale).toInt(), 
+                                (originalBitmap.height * scale).toInt(), 
+                                true
+                            )
+                        } else originalBitmap
+
+                        java.io.FileOutputStream(destFile).use { output ->
+                            finalBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, output)
+                        }
+                        
+                        if (finalBitmap !== originalBitmap) finalBitmap.recycle()
+                        originalBitmap.recycle()
+                    }
+                }
+                
+                // Store only the relative internal URI
+                val internalUri = "internal://$fileName"
+                
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    setTool(DrawingTool.SELECTION)
+                    val newImage = com.midknight.pixelnotes.domain.ImageData(
+                        x = 100f, y = 100f, width = 600f, height = 600f, uri = internalUri
+                    )
+                    selectedImages.add(newImage)
+                    selectionPageIndex = pageIndex
+                    activePageIndex = pageIndex
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun addTextToPage(pageIndex: Int, text: TextData) {
@@ -204,12 +264,94 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         }
     }
 
-    fun deleteSelection() { selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1 }
+    fun dropSelectionToPage(targetPageIndex: Int) {
+        if ((selectedStrokes.isNotEmpty() || selectedTexts.isNotEmpty() || selectedImages.isNotEmpty()) && selectionPageIndex != -1) {
+            val targetPage = currentPages[targetPageIndex]
+            currentPages[targetPageIndex] = targetPage.copy(
+                drawingData = targetPage.drawingData + selectedStrokes,
+                textData = targetPage.textData + selectedTexts,
+                imageData = targetPage.imageData + selectedImages
+            )
+            selectedStrokes.forEach { undoStack.add(EditorAction(targetPageIndex, it, null, null, null, true)) }
+            selectedTexts.forEach { undoStack.add(EditorAction(targetPageIndex, null, it, null, null, true)) }
+            selectedImages.forEach { undoStack.add(EditorAction(targetPageIndex, null, null, it, null, true)) }
+            redoStack.clear(); selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1
+        }
+    }
+
+    fun deleteSelection() {
+        if (selectionPageIndex != -1) {
+            selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, null, null, false)) }
+            selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, null, null, false)) }
+            selectedImages.forEach { undoStack.add(EditorAction(selectionPageIndex, null, null, it, null, false)) }
+            redoStack.clear()
+        }
+        selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1
+    }
     fun changeSelectionColor(newColorArgb: Int) {
         val coloredStrokes = selectedStrokes.map { it.copy(colorArgb = newColorArgb) }
         val coloredTexts = selectedTexts.map { it.copy(colorArgb = newColorArgb) }
         selectedStrokes.clear(); selectedStrokes.addAll(coloredStrokes)
         selectedTexts.clear(); selectedTexts.addAll(coloredTexts)
+    }
+
+    fun changeSelectionFont(newFontName: String) {
+        val updatedTexts = selectedTexts.map { it.copy(fontName = newFontName) }
+        selectedTexts.clear(); selectedTexts.addAll(updatedTexts)
+    }
+
+    fun copySelection() {
+        if (selectedStrokes.isEmpty() && selectedTexts.isEmpty() && selectedImages.isEmpty()) return
+        clipboardStrokes.clear(); clipboardStrokes.addAll(selectedStrokes.map { it.copy() })
+        clipboardTexts.clear(); clipboardTexts.addAll(selectedTexts.map { it.copy() })
+        clipboardImages.clear(); clipboardImages.addAll(selectedImages.map { it.copy() })
+    }
+
+    fun pasteSelection(pageIndex: Int, targetX: Float? = null, targetY: Float? = null) {
+        if (clipboardStrokes.isEmpty() && clipboardTexts.isEmpty() && clipboardImages.isEmpty()) return
+        if (pageIndex !in currentPages.indices) return
+        
+        // Commit current selection before pasting new one
+        commitSelection()
+        
+        val offset = 50f
+        val dx: Float
+        val dy: Float
+        
+        if (targetX != null && targetY != null) {
+            val strokeMinX = clipboardStrokes.flatMap { it.points }.minOfOrNull { it.x } ?: Float.MAX_VALUE
+            val textMinX = clipboardTexts.minOfOrNull { it.x } ?: Float.MAX_VALUE
+            val imageMinX = clipboardImages.minOfOrNull { it.x } ?: Float.MAX_VALUE
+            val minX = minOf(strokeMinX, textMinX, imageMinX).let { if (it == Float.MAX_VALUE) 0f else it }
+
+            val strokeMinY = clipboardStrokes.flatMap { it.points }.minOfOrNull { it.y } ?: Float.MAX_VALUE
+            val textMinY = clipboardTexts.minOfOrNull { it.y } ?: Float.MAX_VALUE
+            val imageMinY = clipboardImages.minOfOrNull { it.y } ?: Float.MAX_VALUE
+            val minY = minOf(strokeMinY, textMinY, imageMinY).let { if (it == Float.MAX_VALUE) 0f else it }
+            
+            dx = targetX - minX
+            dy = targetY - minY
+        } else {
+            dx = offset
+            dy = offset
+        }
+
+        val pastedStrokes = clipboardStrokes.map { it.copy(points = it.points.map { p -> p.copy(x = p.x + dx, y = p.y + dy) }) }
+        val pastedTexts = clipboardTexts.map { it.copy(id = java.util.UUID.randomUUID().toString(), x = it.x + dx, y = it.y + dy) }
+        val pastedImages = clipboardImages.map { it.copy(id = java.util.UUID.randomUUID().toString(), x = it.x + dx, y = it.y + dy) }
+
+        // Auto-select pasted items
+        selectedStrokes.addAll(pastedStrokes)
+        selectedTexts.addAll(pastedTexts)
+        selectedImages.addAll(pastedImages)
+        selectionPageIndex = pageIndex
+        activePageIndex = pageIndex
+    }
+
+    fun duplicateSelection() {
+        if (selectionPageIndex == -1) return
+        copySelection()
+        pasteSelection(selectionPageIndex)
     }
 
     fun addNewPage() { commitSelection(); currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = currentPages.size)); activePageIndex = currentPages.lastIndex }
@@ -264,31 +406,113 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     }
     fun isNoteBlank(): Boolean { if (currentTitle != "New Note" || currentPages.size > 1) return false; val p = currentPages.firstOrNull() ?: return true; return p.drawingData.isEmpty() && p.textData.isEmpty() && p.imageData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1 }
 
+    fun navigateBack(): Boolean {
+        if (currentScreen == 1) {
+            closeEditing()
+            return true
+        }
+        if (currentScreen == 2) {
+            currentScreen = 0
+            return true
+        }
+        if (currentScreen == 0) {
+            if (currentFolderFilter == "Trash") {
+                currentFolderFilter = "All Notes"
+                return true
+            }
+            if (currentFolderFilter != "All Notes") {
+                if (currentFolderFilter.contains("/")) {
+                    currentFolderFilter = currentFolderFilter.substringBeforeLast("/")
+                } else {
+                    currentFolderFilter = "All Notes"
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    fun navigateHome() {
+        currentScreen = 0
+        currentFolderFilter = "All Notes"
+    }
+
     fun openNoteForEditing(noteWP: NoteWithPages?, isInfinite: Boolean = false) {
         selectedNoteWithPages = noteWP; undoStack.clear(); redoStack.clear(); currentColor = Color.Black; currentStrokeWidth = 8f; currentEraserWidth = 20f; currentTextSize = 40f; currentFontName = "Default"; setTool(DrawingTool.PEN); currentPages.clear()
         isCurrentNoteInfinite = noteWP?.note?.isInfinite ?: isInfinite
         cameraResetTrigger++
+        cameraPan = androidx.compose.ui.geometry.Offset.Zero
+        cameraZoom = 1f
         if (noteWP != null && noteWP.pages.isNotEmpty()) { currentTitle = noteWP.note.title; currentPages.addAll(noteWP.pages); activePageIndex = 0 } else { currentTitle = "New Note"; currentPages.add(PageEntity(noteId = 0, pageNumber = 0)); activePageIndex = 0 }
         currentScreen = 1
     }
 
     fun closeEditing() {
         commitSelection()
-        if (!isNoteBlank()) saveCurrentNote(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date()))
+        if (!isNoteBlank()) {
+            val date = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())
+            val capturedNote = selectedNoteWithPages?.note
+            val capturedPages = currentPages.toList()
+            val capturedTitle = currentTitle
+            val capturedIsInfinite = isCurrentNoteInfinite
+            val capturedFolder = capturedNote?.folder ?: if (currentFolderFilter == "All Notes" || currentFolderFilter == "Trash") "General" else currentFolderFilter
+            
+            viewModelScope.launch {
+                saveCurrentNoteToDb(
+                    date = date,
+                    noteOverride = capturedNote,
+                    pagesOverride = capturedPages,
+                    titleOverride = capturedTitle,
+                    isInfiniteOverride = capturedIsInfinite,
+                    folderOverride = capturedFolder
+                )
+            }
+        }
         selectedNoteWithPages = null
         currentScreen = 0
     }
 
     fun saveCurrentNote(date: String) {
-        commitSelection()
-        val targetFolder = selectedNoteWithPages?.note?.folder ?: if (currentFolderFilter == "All Notes" || currentFolderFilter == "Trash") "General" else currentFolderFilter
-        val noteToSave = selectedNoteWithPages?.note?.copy(title = currentTitle, date = date, folder = targetFolder, isInfinite = isCurrentNoteInfinite) ?: Note(title = currentTitle, content = "", date = date, folder = targetFolder, isInfinite = isCurrentNoteInfinite)
-        val pagesSnapshot = currentPages.toList()
+        viewModelScope.launch {
+            saveCurrentNoteToDb(date)
+        }
+    }
 
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+    private suspend fun saveCurrentNoteToDb(
+        date: String,
+        noteOverride: Note? = null,
+        pagesOverride: List<PageEntity>? = null,
+        titleOverride: String? = null,
+        isInfiniteOverride: Boolean? = null,
+        folderOverride: String? = null
+    ) {
+        commitSelection()
+        val timestamp = System.currentTimeMillis()
+        val noteToSave = (noteOverride ?: selectedNoteWithPages?.note)?.copy(
+            title = titleOverride ?: currentTitle,
+            date = date,
+            folder = folderOverride ?: (selectedNoteWithPages?.note?.folder ?: if (currentFolderFilter == "All Notes" || currentFolderFilter == "Trash") "General" else currentFolderFilter),
+            isInfinite = isInfiniteOverride ?: isCurrentNoteInfinite,
+            updatedAt = timestamp
+        ) ?: Note(
+            title = titleOverride ?: currentTitle,
+            content = "",
+            date = date,
+            folder = folderOverride ?: if (currentFolderFilter == "All Notes" || currentFolderFilter == "Trash") "General" else currentFolderFilter,
+            isInfinite = isInfiniteOverride ?: isCurrentNoteInfinite,
+            updatedAt = timestamp
+        )
+        
+        val pagesSnapshot = pagesOverride ?: currentPages.toList()
+
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val noteId = if (noteToSave.id == 0) {
                 val newId = dao.insertNote(noteToSave).toInt()
-                selectedNoteWithPages = NoteWithPages(noteToSave.copy(id = newId), pagesSnapshot)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (currentScreen == 1) {
+                        selectedNoteWithPages = NoteWithPages(noteToSave.copy(id = newId), pagesSnapshot)
+                    }
+                }
                 newId
             } else {
                 dao.updateNote(noteToSave)
@@ -321,14 +545,64 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
 
     fun recoverStorageSpace(context: android.content.Context, onComplete: (String) -> Unit) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            var deletedBytes = 0L
-            try {
-                val pdfDir = java.io.File(context.filesDir, "imported_pdfs")
-                if (pdfDir.exists()) { pdfDir.listFiles()?.forEach { file -> deletedBytes += file.length(); file.delete() } }
-            } catch (e: Exception) { e.printStackTrace() }
-            val mbRecovered = deletedBytes / (1024 * 1024)
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onComplete("Freed $mbRecovered MB of ghost files.") }
+            val freedBytes = pruneOrphanFiles()
+            val mbRecovered = freedBytes / (1024 * 1024)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { 
+                onComplete("Freed $mbRecovered MB of ghost files.") 
+            }
         }
+    }
+
+    private suspend fun pruneOrphanFiles(): Long {
+        var deletedBytes = 0L
+        try {
+            val allNotesWP: List<com.midknight.pixelnotes.data.NoteWithPages> = dao.getNotesWithPagesSync()
+            val activeFiles = mutableSetOf<String>()
+            
+            allNotesWP.forEach { noteWP ->
+                noteWP.pages.forEach { page ->
+                    // 1. Collect PDFs and Background Images
+                    page.backgroundUri?.let { uri ->
+                        if (uri.contains("imported_pdfs/")) {
+                            val path = uri.split("?pdfPage=")[0]
+                            activeFiles.add(java.io.File(path).name)
+                        } else if (uri.contains("inserted_images/")) {
+                            activeFiles.add(uri.substringAfterLast("/"))
+                        }
+                    }
+                    // 2. Collect Images
+                    page.imageData.forEach { img ->
+                        if (img.uri.startsWith("internal://")) {
+                            activeFiles.add(img.uri.removePrefix("internal://"))
+                        } else if (img.uri.contains("inserted_images/")) {
+                            activeFiles.add(img.uri.substringAfterLast("/"))
+                        }
+                    }
+                    // 3. Collect Audio
+                    page.audioData.forEach { audio ->
+                        activeFiles.add(java.io.File(audio.uri).name)
+                    }
+                }
+            }
+
+            // Prune folders
+            val dirs = listOf("inserted_images", "audio_notes", "imported_pdfs")
+            dirs.forEach { dirName ->
+                val dir = java.io.File(context.filesDir, dirName)
+                if (dir.exists()) {
+                    dir.listFiles()?.forEach { file ->
+                        if (file.isFile && !activeFiles.contains(file.name)) {
+                            deletedBytes += file.length()
+                            file.delete()
+                            android.util.Log.d("NotesViewModel", "Pruned orphan: ${file.name}")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return deletedBytes
     }
 
     fun importPdfDocument(context: android.content.Context, uri: android.net.Uri) {
@@ -363,14 +637,14 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
 
     fun moveToTrash() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            selectedNotes.forEach { dao.updateNote(it.note.copy(inTrash = true)) }
+            selectedNotes.forEach { dao.updateNote(it.note.copy(inTrash = true, updatedAt = System.currentTimeMillis())) }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { clearSelection() }
         }
     }
 
     fun restoreFromTrash() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            selectedNotes.forEach { dao.updateNote(it.note.copy(inTrash = false)) }
+            selectedNotes.forEach { dao.updateNote(it.note.copy(inTrash = false, updatedAt = System.currentTimeMillis())) }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { clearSelection() }
         }
     }
@@ -489,15 +763,27 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         currentRecordingFile = null
     }
 
-    fun playAudio(uri: String) {
-        stopAudio() // Stop any current playback before starting new one
+    fun playAudio(uri: String, id: String, pageIndex: Int) {
+        if (activeAudioUri == uri && activeAudioId == id) {
+            if (isPlaying) {
+                pauseAudio()
+            } else {
+                resumeAudio()
+            }
+            return
+        }
+        stopAudio()
         activeAudioUri = uri
+        activeAudioId = id
+        activeAudioPageIndex = pageIndex
         isPlaying = true
         mediaPlayer = android.media.MediaPlayer().apply {
             try {
                 setDataSource(uri)
                 prepare()
+                currentAudioDuration = duration.toLong()
                 start()
+                startPlaybackTimer()
                 setOnCompletionListener { stopAudio() }
             } catch (e: java.io.IOException) {
                 e.printStackTrace()
@@ -506,9 +792,45 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         }
     }
 
+    private fun startPlaybackTimer() {
+        playbackJob?.cancel()
+        playbackJob = viewModelScope.launch {
+            while (isPlaying) {
+                mediaPlayer?.let {
+                    playbackProgress = it.currentPosition.toFloat() / it.duration.toFloat()
+                }
+                kotlinx.coroutines.delay(50)
+            }
+        }
+    }
+
+    fun pauseAudio() {
+        isPlaying = false
+        playbackJob?.cancel()
+        mediaPlayer?.pause()
+    }
+
+    fun resumeAudio() {
+        isPlaying = true
+        mediaPlayer?.start()
+        startPlaybackTimer()
+    }
+
+    fun seekAudio(progress: Float) {
+        mediaPlayer?.let {
+            val seekTo = (progress * it.duration).toInt()
+            it.seekTo(seekTo)
+            playbackProgress = progress
+        }
+    }
+
     fun stopAudio() {
         isPlaying = false
+        playbackProgress = 0f
         activeAudioUri = null
+        activeAudioId = null
+        activeAudioPageIndex = -1
+        playbackJob?.cancel()
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()
@@ -518,10 +840,39 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         mediaPlayer = null
     }
 
-    fun updateTextOnPage(pageIndex: Int, oldText: TextData, newText: String) {
+    fun updateAudioPosition(pageIndex: Int, audioId: String, newX: Float, newY: Float) {
+        if (pageIndex !in currentPages.indices) return
         val page = currentPages[pageIndex]
-        val updatedText = oldText.copy(text = newText)
-        currentPages[pageIndex] = page.copy(textData = page.textData.map { if (it.id == oldText.id) updatedText else it })
+        currentPages[pageIndex] = page.copy(audioData = page.audioData.map {
+            if (it.id == audioId) it.copy(x = newX, y = newY) else it
+        })
+    }
+
+    fun deleteAudioNote(pageIndex: Int, audioId: String) {
+        if (pageIndex !in currentPages.indices) return
+        val page = currentPages[pageIndex]
+        val audioToDelete = page.audioData.find { it.id == audioId } ?: return
+        currentPages[pageIndex] = page.copy(audioData = page.audioData.filter { it.id != audioId })
+        undoStack.add(EditorAction(pageIndex, null, null, null, audioToDelete, false))
+        redoStack.clear()
+        if (activeAudioUri == audioToDelete.uri) stopAudio()
+    }
+
+    fun updateTextOnPage(pageIndex: Int, oldText: TextData, newText: String, newFontName: String? = null) {
+        val updatedText = oldText.copy(text = newText, fontName = newFontName ?: oldText.fontName)
+        
+        // 1. Check if the text is in the main page list
+        val page = currentPages[pageIndex]
+        if (page.textData.any { it.id == oldText.id }) {
+            currentPages[pageIndex] = page.copy(textData = page.textData.map { if (it.id == oldText.id) updatedText else it })
+        }
+        
+        // 2. Check if the text is in the current selection
+        val selectedIdx = selectedTexts.indexOfFirst { it.id == oldText.id }
+        if (selectedIdx != -1) {
+            selectedTexts[selectedIdx] = updatedText
+        }
+
         undoStack.add(EditorAction(pageIndex, null, oldText, null, null, false))
         undoStack.add(EditorAction(pageIndex, null, updatedText, null, null, true))
         redoStack.clear()
@@ -589,27 +940,173 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
 
     private fun performInitialSync(context: android.content.Context, email: String) {
         isSyncing = true
-        viewModelScope.launch {
-            val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
-            
-            // 1. FIRST: Backup local state to cloud (Merge attempt at file level)
-            if (notes.value.isNotEmpty()) {
-                syncManager.backupToDrive(email)
-            }
-            
-            // 2. IMPORTANT: Close DB before restoring to avoid file lock
-            com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
-
-            // 3. Then restore the merged cloud state
-            val result = syncManager.restoreFromDrive(email)
-            
-            isSyncing = false
-            if (result.isSuccess) {
-                restartApp(context, "")
-            } else {
-                com.midknight.pixelnotes.data.NoteDatabase.getDatabase(context)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                android.util.Log.d("HandshakeMerge", "Starting initial sync for $email")
+                val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
+                
+                // 1. Download cloud backup to a "waiting room" (temp ZIP)
+                val cloudZip = syncManager.downloadBackupToTemp(email)
+                
+                if (cloudZip != null && cloudZip.exists()) {
+                    android.util.Log.d("HandshakeMerge", "Cloud backup found (${cloudZip.length()} bytes). Starting merge.")
+                    // 2. Perform a "Handshake Merge"
+                    // This combines cloud notes with local ones record-by-record
+                    val mergedCount = mergeCloudData(context, cloudZip)
+                    android.util.Log.d("HandshakeMerge", "Merge finished. Imported $mergedCount notes from cloud.")
+                    cloudZip.delete()
+                } else {
+                    android.util.Log.d("HandshakeMerge", "No cloud backup found to merge.")
+                }
+                
+                // 3. Final Backup: Push the unified family to the cloud
+                // This ensures the cloud now has Note A + (B, C, D)
+                android.util.Log.d("HandshakeMerge", "Uploading unified backup to cloud...")
+                syncManager.backupToDrive(email, force = true)
+                android.util.Log.d("HandshakeMerge", "Unified backup upload complete.")
+                
+            } catch (e: Exception) {
+                android.util.Log.e("HandshakeMerge", "Initial sync/merge failed", e)
+            } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isSyncing = false
+                }
             }
         }
+    }
+
+    private suspend fun mergeCloudData(context: android.content.Context, zipFile: java.io.File): Int {
+        var importCount = 0
+        try {
+            val tempDir = java.io.File(context.cacheDir, "merge_extract_${System.currentTimeMillis()}")
+            tempDir.mkdirs()
+
+            // 1. Extract ZIP to temp
+            java.util.zip.ZipInputStream(java.io.FileInputStream(zipFile)).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    val destFile = java.io.File(tempDir, entry.name)
+                    destFile.parentFile?.mkdirs()
+                    if (!entry.isDirectory) {
+                        java.io.FileOutputStream(destFile).use { out -> zis.copyTo(out) }
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+
+            val cloudDbFile = java.io.File(tempDir, "database/pixel_notes_database")
+            if (cloudDbFile.exists()) {
+                val cloudDb = android.database.sqlite.SQLiteDatabase.openDatabase(cloudDbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY)
+                
+                // Fetch all notes from cloud DB
+                val cursor = cloudDb.rawQuery("SELECT * FROM notes", null)
+                val localNotes = dao.getNotesWithPagesSync()
+                val localTitles = localNotes.map { it.note.title }.toSet()
+
+                android.util.Log.d("HandshakeMerge", "Cloud DB opened. Found ${cursor.count} notes in cloud backup.")
+
+                if (cursor.moveToFirst()) {
+                    do {
+                        var title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
+                        
+                        // Deduplication Strategy: If title exists, rename instead of skipping
+                        // This proves the merge is working and doesn't lose any data version.
+                        if (localTitles.contains(title)) {
+                            title = "$title (Cloud)"
+                            android.util.Log.d("HandshakeMerge", "Title conflict for '$title'. Renaming for import.")
+                        }
+
+                        val cloudId = cursor.getInt(cursor.getColumnIndexOrThrow("id"))
+                        val content = cursor.getString(cursor.getColumnIndexOrThrow("content")) ?: ""
+                        val date = cursor.getString(cursor.getColumnIndexOrThrow("date")) ?: ""
+                        val folder = cursor.getString(cursor.getColumnIndexOrThrow("folder")) ?: "General"
+                        val inTrash = cursor.getInt(cursor.getColumnIndexOrThrow("inTrash")) == 1
+                        val isInfinite = cursor.getInt(cursor.getColumnIndexOrThrow("isInfinite")) == 1
+                        val updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updatedAt"))
+
+                        val newNote = Note(title = title, content = content, date = date, folder = folder, inTrash = inTrash, isInfinite = isInfinite, updatedAt = updatedAt)
+                        val newId = dao.insertNote(newNote).toInt()
+
+                        // Fetch and insert pages for this note
+                        val pageCursor = cloudDb.rawQuery("SELECT * FROM pages WHERE noteId = ?", arrayOf(cloudId.toString()))
+                        if (pageCursor.moveToFirst()) {
+                            val pages = mutableListOf<PageEntity>()
+                            val converters = com.midknight.pixelnotes.data.Converters()
+                            do {
+                                val pageNumber = pageCursor.getInt(pageCursor.getColumnIndexOrThrow("pageNumber"))
+                                val drawingData = pageCursor.getString(pageCursor.getColumnIndexOrThrow("drawingData")) ?: "[]"
+                                val textData = pageCursor.getString(pageCursor.getColumnIndexOrThrow("textData")) ?: "[]"
+                                val imageData = pageCursor.getString(pageCursor.getColumnIndexOrThrow("imageData")) ?: "[]"
+                                val audioData = pageCursor.getString(pageCursor.getColumnIndexOrThrow("audioData")) ?: "[]"
+                                val bgUri = pageCursor.getString(pageCursor.getColumnIndexOrThrow("backgroundUri"))
+                                val style = pageCursor.getInt(pageCursor.getColumnIndexOrThrow("paperStyle"))
+                                val color = pageCursor.getInt(pageCursor.getColumnIndexOrThrow("canvasColor"))
+
+                                // Fix Background URI if it points to a PDF
+                                var finalBgUri = bgUri
+                                if (bgUri != null && bgUri.contains("imported_pdfs/")) {
+                                    val fileName = java.io.File(bgUri.split("?pdfPage=")[0]).name
+                                    val suffix = if (bgUri.contains("?pdfPage=")) "?pdfPage=" + bgUri.split("?pdfPage=")[1] else ""
+                                    finalBgUri = java.io.File(java.io.File(context.filesDir, "imported_pdfs"), fileName).absolutePath + suffix
+                                }
+
+                                // Remap Image URIs to portable format
+                                val rawImageList = converters.toImageList(imageData)
+                                val normalizedImages = rawImageList.map { img ->
+                                    if (img.uri.contains("inserted_images/")) {
+                                        val fileName = img.uri.substringAfterLast("/")
+                                        img.copy(uri = "internal://$fileName")
+                                    } else img
+                                }
+
+                                pages.add(PageEntity(
+                                    noteId = newId,
+                                    pageNumber = pageNumber,
+                                    drawingData = converters.toStrokeList(drawingData),
+                                    textData = converters.toTextList(textData),
+                                    imageData = normalizedImages,
+                                    audioData = converters.toAudioList(audioData),
+                                    backgroundUri = finalBgUri,
+                                    paperStyle = style,
+                                    canvasColor = color
+                                ))
+                            } while (pageCursor.moveToNext())
+                            dao.insertPages(pages)
+                            pageCursor.close()
+                        }
+                        importCount++
+                        android.util.Log.d("HandshakeMerge", "Imported note: $title with ID: $newId")
+                    } while (cursor.moveToNext())
+                }
+                cursor.close()
+                cloudDb.close()
+            } else {
+                android.util.Log.e("HandshakeMerge", "Could not find database file inside extracted ZIP.")
+            }
+
+            // 2. Copy Media Assets (Images, Audio, PDFs)
+            val mediaDirs = listOf("inserted_images", "audio_notes", "imported_pdfs")
+            mediaDirs.forEach { dirName ->
+                val srcDir = java.io.File(tempDir, "files/$dirName")
+                if (srcDir.exists()) {
+                    val destDir = java.io.File(context.filesDir, dirName)
+                    if (!destDir.exists()) destDir.mkdirs()
+                    srcDir.listFiles()?.forEach { file ->
+                        try {
+                            file.copyTo(java.io.File(destDir, file.name), overwrite = true)
+                        } catch (e: Exception) {
+                            android.util.Log.e("HandshakeMerge", "Failed to copy media file: ${file.name}", e)
+                        }
+                    }
+                }
+            }
+
+            tempDir.deleteRecursively()
+        } catch (e: Exception) {
+            android.util.Log.e("HandshakeMerge", "Error during record-level merge", e)
+        }
+        return importCount
     }
 
     fun signOut(context: android.content.Context) { 
@@ -660,14 +1157,25 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
 
     fun backupToCloud(context: android.content.Context) {
         val email = userEmail ?: return
+        
         isSyncing = true
         viewModelScope.launch {
-            val result = com.midknight.pixelnotes.domain.CloudSyncManager(context).backupToDrive(email)
+            // Force save current note before backup if we are on the drawing screen
+            if (currentScreen == 1) {
+                saveCurrentNoteToDb(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date()))
+            }
+
+            // Perform Garbage Collection to reduce ZIP size
+            pruneOrphanFiles()
+
+            val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
+            
+            // For manual backup, we use force=true to ensure upload happens
+            val result = syncManager.backupToDrive(email, force = true)
             isSyncing = false
 
             val exception = result.exceptionOrNull()
             if (exception is com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException) {
-                // This is the "NeedRemoteConsent" error - we need to launch the system intent
                 pendingSyncIntent = exception.intent
             } else if (result.isSuccess) {
                 android.widget.Toast.makeText(context, "Backup successful!", android.widget.Toast.LENGTH_SHORT).show()
@@ -677,7 +1185,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         }
     }
 
-    fun restoreFromCloud(context: android.content.Context) {
+    fun restoreFromCloudManual(context: android.content.Context) {
         val email = userEmail ?: return
         isSyncing = true
         viewModelScope.launch {
@@ -695,6 +1203,153 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
             } else {
                 android.widget.Toast.makeText(context, "Restore failed: ${result.exceptionOrNull()?.message}", android.widget.Toast.LENGTH_LONG).show()
                 com.midknight.pixelnotes.data.NoteDatabase.getDatabase(context)
+            }
+        }
+    }
+
+    fun purgeCloudData(context: android.content.Context) {
+        val email = userEmail ?: return
+        isSyncing = true
+        viewModelScope.launch {
+            val result = com.midknight.pixelnotes.domain.CloudSyncManager(context).purgeAllCloudBackups(email)
+            isSyncing = false
+            if (result.isSuccess) {
+                android.widget.Toast.makeText(context, "Cloud data purged successfully", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                android.widget.Toast.makeText(context, "Purge failed: ${result.exceptionOrNull()?.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun createLocalBackup(context: android.content.Context, uri: android.net.Uri) {
+        isSyncing = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                // 1. Force save current note
+                if (currentScreen == 1) {
+                    saveCurrentNoteToDb(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date()))
+                }
+                
+                // 2. Prune orphans
+                pruneOrphanFiles()
+                
+                // 3. Create snapshot
+                val snapshotFile = java.io.File(context.cacheDir, "local_db_snapshot.db")
+                com.midknight.pixelnotes.data.NoteDatabase.createBackupSnapshot(context, snapshotFile)
+                
+                // 4. Create ZIP
+                val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
+                val zipFile = syncManager.createBackupZip(snapshotFile)
+                
+                // 5. Copy to destination URI
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    java.io.FileInputStream(zipFile).use { input ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                zipFile.delete()
+                snapshotFile.delete()
+                
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isSyncing = false
+                    android.widget.Toast.makeText(context, "Local backup created!", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isSyncing = false
+                    android.widget.Toast.makeText(context, "Backup failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun restoreLocalBackup(context: android.content.Context, uri: android.net.Uri) {
+        isSyncing = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                // 1. Copy ZIP from URI to cache
+                val tempZip = java.io.File(context.cacheDir, "local_restore_temp.zip")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    java.io.FileOutputStream(tempZip).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                // 2. Close DB
+                com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
+                
+                // 3. Extract
+                val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
+                syncManager.extractBackupZip(tempZip)
+                tempZip.delete()
+                
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isSyncing = false
+                    restartApp(context, "Local backup restored! Restarting...")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    isSyncing = false
+                    android.widget.Toast.makeText(context, "Restore failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                    com.midknight.pixelnotes.data.NoteDatabase.getDatabase(context)
+                }
+            }
+        }
+    }
+
+    fun exportSingleNote(context: android.content.Context, noteWP: NoteWithPages, uri: android.net.Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val packager = com.midknight.pixelnotes.domain.SingleNotePackage(context)
+                val file = packager.exportNote(noteWP)
+                file?.let {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        java.io.FileInputStream(it).use { input ->
+                            input.copyTo(output)
+                        }
+                    }
+                    it.delete()
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "Note exported successfully!", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun importSingleNote(context: android.content.Context, uri: android.net.Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val tempZip = java.io.File(context.cacheDir, "import_target.pxnote")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    java.io.FileOutputStream(tempZip).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                val packager = com.midknight.pixelnotes.domain.SingleNotePackage(context)
+                val importedNote = packager.importNote(tempZip)
+                tempZip.delete()
+
+                if (importedNote != null) {
+                    val noteId = dao.insertNote(importedNote.note).toInt()
+                    val pages = importedNote.pages.map { it.copy(noteId = noteId) }
+                    dao.insertPages(pages)
+                    
+                    val finalNoteWP = NoteWithPages(importedNote.note.copy(id = noteId), pages)
+                    
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "Note imported: ${importedNote.note.title}", android.widget.Toast.LENGTH_SHORT).show()
+                        openNoteForEditing(finalNoteWP)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
