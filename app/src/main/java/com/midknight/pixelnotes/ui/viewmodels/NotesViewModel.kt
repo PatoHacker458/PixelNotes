@@ -1145,12 +1145,34 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
 
     private fun restartApp(context: android.content.Context, message: String) {
         if (message.isNotBlank()) android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
-        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        (context as? android.app.Activity)?.finish()
-        java.lang.Runtime.getRuntime().exit(0)
+        
+        val packageManager = context.packageManager
+        val intent = packageManager.getLaunchIntentForPackage(context.packageName)
+        val componentName = intent?.component
+        val mainIntent = android.content.Intent.makeRestartActivityTask(componentName)
+        
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            context, 
+            0, 
+            mainIntent, 
+            android.app.PendingIntent.FLAG_CANCEL_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val alarmManager = context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+        
+        // Schedule restart for 100ms from now
+        alarmManager.set(
+            android.app.AlarmManager.RTC, 
+            System.currentTimeMillis() + 100,
+            pendingIntent
+        )
+
+        // Shutdown current process
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            kotlinx.coroutines.delay(50)
+            (context as? android.app.Activity)?.finish()
+            java.lang.Runtime.getRuntime().exit(0)
+        }
     }
 
     var pendingSyncIntent by mutableStateOf<android.content.Intent?>(null)
@@ -1160,17 +1182,14 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         
         isSyncing = true
         viewModelScope.launch {
-            // Force save current note before backup if we are on the drawing screen
             if (currentScreen == 1) {
                 saveCurrentNoteToDb(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date()))
             }
 
-            // Perform Garbage Collection to reduce ZIP size
             pruneOrphanFiles()
 
             val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
             
-            // For manual backup, we use force=true to ensure upload happens
             val result = syncManager.backupToDrive(email, force = true)
             isSyncing = false
 
@@ -1193,13 +1212,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
             val result = com.midknight.pixelnotes.domain.CloudSyncManager(context).restoreFromDrive(email)
             isSyncing = false
             if (result.isSuccess) {
-                android.widget.Toast.makeText(context, "Restore successful! Restarting...", android.widget.Toast.LENGTH_LONG).show()
-                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                (context as? android.app.Activity)?.finish()
-                java.lang.Runtime.getRuntime().exit(0)
+                restartApp(context, "Restore successful! Restarting...")
             } else {
                 android.widget.Toast.makeText(context, "Restore failed: ${result.exceptionOrNull()?.message}", android.widget.Toast.LENGTH_LONG).show()
                 com.midknight.pixelnotes.data.NoteDatabase.getDatabase(context)
@@ -1225,23 +1238,18 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         isSyncing = true
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                // 1. Force save current note
                 if (currentScreen == 1) {
                     saveCurrentNoteToDb(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date()))
                 }
                 
-                // 2. Prune orphans
                 pruneOrphanFiles()
                 
-                // 3. Create snapshot
                 val snapshotFile = java.io.File(context.cacheDir, "local_db_snapshot.db")
                 com.midknight.pixelnotes.data.NoteDatabase.createBackupSnapshot(context, snapshotFile)
                 
-                // 4. Create ZIP
                 val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
                 val zipFile = syncManager.createBackupZip(snapshotFile)
                 
-                // 5. Copy to destination URI
                 context.contentResolver.openOutputStream(uri)?.use { output ->
                     java.io.FileInputStream(zipFile).use { input ->
                         input.copyTo(output)
@@ -1269,7 +1277,6 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         isSyncing = true
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                // 1. Copy ZIP from URI to cache
                 val tempZip = java.io.File(context.cacheDir, "local_restore_temp.zip")
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     java.io.FileOutputStream(tempZip).use { output ->
@@ -1277,10 +1284,8 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                     }
                 }
                 
-                // 2. Close DB
                 com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
                 
-                // 3. Extract
                 val syncManager = com.midknight.pixelnotes.domain.CloudSyncManager(context)
                 syncManager.extractBackupZip(tempZip)
                 tempZip.delete()

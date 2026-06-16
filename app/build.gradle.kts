@@ -13,8 +13,8 @@ android {
         applicationId = "com.midknight.pixelnotes"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.4.0-beta"
+        versionCode = 10
+        versionName = "1.4.1-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
