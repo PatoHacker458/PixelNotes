@@ -45,6 +45,7 @@ import com.midknight.pixelnotes.domain.StrokeData
 import com.midknight.pixelnotes.domain.TextData
 import com.midknight.pixelnotes.domain.TypefaceManager
 import com.midknight.pixelnotes.domain.detectAndSnapShape
+import com.midknight.pixelnotes.domain.HapticManager
 import com.midknight.pixelnotes.ui.viewmodels.DrawingTool
 
 fun getSelectionBounds(strokes: List<StrokeData>, texts: List<TextData>, images: List<ImageData>): Rect {
@@ -85,6 +86,7 @@ fun DrawingCanvas(
     onStrokeAdd: (StrokeData) -> Unit, onStrokeRemove: (StrokeData) -> Unit, onTextToolTap: (Float, Float) -> Unit, onTextEdit: (TextData) -> Unit, onProcessSelection: (List<PointData>) -> Unit, onMoveSelection: (Float, Float) -> Unit, onScaleSelection: (Float, Float, Float) -> Unit, onCommitSelection: () -> Unit, onSelectionLongPress: (Offset) -> Unit, onCameraChange: (Offset, Float) -> Unit, modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val haptic = remember { HapticManager(context) }
     var currentPath by remember { mutableStateOf<Path?>(null) }
     var currentPoints by remember { mutableStateOf<MutableList<PointData>>(mutableListOf()) }
     var lastTapTime by remember { mutableStateOf(0L) }
@@ -120,6 +122,7 @@ fun DrawingCanvas(
         val virtualWidth = 1080f; var stylusModeActive = false
         awaitEachGesture {
             val down = awaitFirstDown()
+            haptic.tick()
             
             val currentEffectiveScale = (size.width / virtualWidth) * updatedCameraZoom
             val toVirtual = { x: Float, y: Float -> PointData((x - updatedCameraPan.x) / currentEffectiveScale, (y - updatedCameraPan.y) / currentEffectiveScale) }
@@ -346,6 +349,7 @@ fun DrawingCanvas(
                     if (!isHoldingShape && !isZooming && isAllowedTouch && updatedTool != DrawingTool.TEXT && points.size > 15) {
                         val perfectShape = detectAndSnapShape(points)
                         if (perfectShape != null) {
+                            haptic.heavyClick()
                             isHoldingShape = true
                             points.clear(); points.addAll(perfectShape)
                             path.reset(); path.moveTo(points.first().x, points.first().y)
@@ -392,6 +396,7 @@ fun DrawingCanvas(
 
             if (!isZooming && isAllowedTouch && updatedTool != DrawingTool.TEXT) { if (!isHoldingShape) path.lineTo(prevX, prevY) }
             if ((!isZooming || points.size > 3) && isAllowedTouch && updatedTool != DrawingTool.TEXT) {
+                haptic.tick()
                 onStrokeAdd(StrokeData(points = points.toList(), colorArgb = updatedColor.toArgb(), strokeWidth = updatedStrokeWidth, isEraser = currentIsEraser, isHighlighter = updatedTool == DrawingTool.HIGHLIGHTER && !isHardwareEraser))
             }
             currentPath = null

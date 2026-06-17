@@ -53,12 +53,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.LaunchedEffect
+import com.midknight.pixelnotes.domain.HapticManager
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: NotesViewModel) {
     val context = LocalContext.current
+    val haptic = remember { HapticManager(context) }
     val customFonts by viewModel.customFonts.collectAsState()
 
     var showNameDialog by remember { mutableStateOf(false) }
@@ -152,6 +154,7 @@ fun SettingsScreen(viewModel: NotesViewModel) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = {
+                            haptic.click()
                             isCleaning = true
                             viewModel.recoverStorageSpace(context) { message ->
                                 isCleaning = false
@@ -185,7 +188,10 @@ fun SettingsScreen(viewModel: NotesViewModel) {
                     Text("Import your own .ttf or .otf files to use them in your text notes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
-                        onClick = { fontPickerLauncher.launch("*/*") },
+                        onClick = { 
+                            haptic.click()
+                            fontPickerLauncher.launch("*/*") 
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(Icons.Filled.FontDownload, contentDescription = null, modifier = Modifier.size(18.dp))

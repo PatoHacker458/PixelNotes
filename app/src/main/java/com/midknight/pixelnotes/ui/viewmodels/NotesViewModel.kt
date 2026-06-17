@@ -1146,39 +1146,28 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     private fun restartApp(context: android.content.Context, message: String) {
         if (message.isNotBlank()) android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
         
+        // 1. Fully close and nullify the database instance
+        com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
+        
+        // 2. Prepare a "Warm Restart" intent
         val packageManager = context.packageManager
         val intent = packageManager.getLaunchIntentForPackage(context.packageName)
-        val componentName = intent?.component
-        val mainIntent = android.content.Intent.makeRestartActivityTask(componentName)
         
-        val pendingIntent = android.app.PendingIntent.getActivity(
-            context, 
-            0, 
-            mainIntent, 
-            android.app.PendingIntent.FLAG_CANCEL_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val alarmManager = context.getSystemService(android.content.Context.ALARM_SERVICE) as android.app.AlarmManager
+        // 3. Clear the entire Activity task stack
+        intent?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
         
-        // Schedule restart for 100ms from now
-        alarmManager.set(
-            android.app.AlarmManager.RTC, 
-            System.currentTimeMillis() + 100,
-            pendingIntent
-        )
-
-        // Shutdown current process
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-            kotlinx.coroutines.delay(50)
-            (context as? android.app.Activity)?.finish()
-            java.lang.Runtime.getRuntime().exit(0)
-        }
+        // 4. Launch fresh MainActivity (this destroys the current ViewModel and UI state)
+        context.startActivity(intent)
+        
+        // 5. Finish the current instance (foreground stays active, satisfying Android 14 security)
+        (context as? android.app.Activity)?.finish()
     }
 
     var pendingSyncIntent by mutableStateOf<android.content.Intent?>(null)
 
     fun backupToCloud(context: android.content.Context) {
         val email = userEmail ?: return
+        val haptic = com.midknight.pixelnotes.domain.HapticManager(context)
         
         isSyncing = true
         viewModelScope.launch {
@@ -1197,6 +1186,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
             if (exception is com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException) {
                 pendingSyncIntent = exception.intent
             } else if (result.isSuccess) {
+                haptic.heavyClick()
                 android.widget.Toast.makeText(context, "Backup successful!", android.widget.Toast.LENGTH_SHORT).show()
             } else {
                 android.widget.Toast.makeText(context, "Backup failed: ${exception?.message}", android.widget.Toast.LENGTH_LONG).show()
@@ -1206,12 +1196,14 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
 
     fun restoreFromCloudManual(context: android.content.Context) {
         val email = userEmail ?: return
+        val haptic = com.midknight.pixelnotes.domain.HapticManager(context)
         isSyncing = true
         viewModelScope.launch {
             com.midknight.pixelnotes.data.NoteDatabase.closeDatabase()
             val result = com.midknight.pixelnotes.domain.CloudSyncManager(context).restoreFromDrive(email)
             isSyncing = false
             if (result.isSuccess) {
+                haptic.heavyClick()
                 restartApp(context, "Restore successful! Restarting...")
             } else {
                 android.widget.Toast.makeText(context, "Restore failed: ${result.exceptionOrNull()?.message}", android.widget.Toast.LENGTH_LONG).show()
@@ -1235,6 +1227,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     }
 
     fun createLocalBackup(context: android.content.Context, uri: android.net.Uri) {
+        val haptic = com.midknight.pixelnotes.domain.HapticManager(context)
         isSyncing = true
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
@@ -1261,6 +1254,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                 
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     isSyncing = false
+                    haptic.heavyClick()
                     android.widget.Toast.makeText(context, "Local backup created!", android.widget.Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {

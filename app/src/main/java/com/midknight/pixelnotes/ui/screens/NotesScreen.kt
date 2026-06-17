@@ -85,12 +85,10 @@ import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.FolderEntity
 import com.midknight.pixelnotes.data.NoteWithPages
-import com.midknight.pixelnotes.ui.components.ExpressiveButton
-import com.midknight.pixelnotes.ui.components.ExpressiveFAB
-import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
-import com.midknight.pixelnotes.ui.components.FolderCard
-import com.midknight.pixelnotes.ui.components.NoteCard
+import com.midknight.pixelnotes.domain.HapticManager
+import com.midknight.pixelnotes.ui.components.*
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,13 +122,14 @@ fun NotesScreen(
     onImportPdf: () -> Unit,
     viewModel: NotesViewModel
 ) {
+    val context = LocalContext.current
+    val haptic = remember { HapticManager(context) }
     var searchQuery by remember { mutableStateOf("") }
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
     var newFolderName by remember { mutableStateOf("") }
     var showFabMenu by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
-    val context = LocalContext.current
 
     if (folderToDelete != null) {
         AlertDialog(
@@ -424,8 +423,14 @@ fun NotesScreen(
                             NoteCard(
                                 noteWithPages = noteWP,
                                 isSelected = selectedNotes.any { it.note.id == noteWP.note.id },
-                                onClick = { if (selectedNotes.isNotEmpty() || currentFolder == "Trash") onNoteLongClick(noteWP) else onNoteClick(noteWP) },
-                                onLongClick = { onNoteLongClick(noteWP) }
+                                onClick = { 
+                                    haptic.click()
+                                    if (selectedNotes.isNotEmpty() || currentFolder == "Trash") onNoteLongClick(noteWP) else onNoteClick(noteWP) 
+                                },
+                                onLongClick = { 
+                                    haptic.selection()
+                                    onNoteLongClick(noteWP) 
+                                }
                             )
                         }
                     }
@@ -604,10 +609,15 @@ fun ProfileDialogRow(
     text: String,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val haptic = remember { HapticManager(context) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = {
+                haptic.click()
+                onClick()
+            })
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

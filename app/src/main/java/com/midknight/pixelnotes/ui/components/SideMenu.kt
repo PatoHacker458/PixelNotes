@@ -52,7 +52,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.midknight.pixelnotes.data.FolderEntity
+import com.midknight.pixelnotes.domain.HapticManager
 import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
 
 data class FolderNode(val folder: FolderEntity, val children: List<FolderNode>)
@@ -76,6 +78,8 @@ fun SideMenu(
     onDeleteFolder: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val haptic = remember { HapticManager(context) }
     val tree = remember(folders) { buildFolderTree(folders) }
     var showDialog by remember { mutableStateOf(false) }
     var targetParentPath by remember { mutableStateOf<String?>(null) }
@@ -140,21 +144,22 @@ fun SideMenu(
 
         LazyColumn(modifier = Modifier.weight(1f)) {
             item {
-                SideMenuItem(text = "All Notes", isSelected = currentFolder == "All Notes", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { onFolderSelected("All Notes") }, onAddSubfolder = null, onRename = {}, onDelete = {})
+                SideMenuItem(text = "All Notes", isSelected = currentFolder == "All Notes", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { haptic.click(); onFolderSelected("All Notes") }, onAddSubfolder = null, onRename = {}, onDelete = {}, haptic = haptic)
             }
             items(tree) { node ->
                 FolderTreeNode(
                     node = node, currentFolder = currentFolder, depth = 0, onFolderSelected = onFolderSelected,
                     onAddSubfolder = { path -> targetParentPath = path; showDialog = true },
                     onRename = { path, name -> folderToRenamePath = path; folderRenameValue = name; showRenameDialog = true },
-                    onDelete = onDeleteFolder
+                    onDelete = onDeleteFolder,
+                    haptic = haptic
                 )
             }
             item {
-                SideMenuItem(text = "Trash", isSelected = currentFolder == "Trash", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { onFolderSelected("Trash") }, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.DeleteSweep)
+                SideMenuItem(text = "Trash", isSelected = currentFolder == "Trash", depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { haptic.click(); onFolderSelected("Trash") }, onAddSubfolder = null, onRename = {}, onDelete = {}, haptic = haptic, iconOverride = Icons.Default.DeleteSweep)
             }
             item {
-                SideMenuItem(text = "Settings", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = onSettingsSelected, onAddSubfolder = null, onRename = {}, onDelete = {}, iconOverride = Icons.Default.Settings)
+                SideMenuItem(text = "Settings", isSelected = false, depth = 0, hasChildren = false, isExpanded = false, canEdit = false, onToggleExpand = {}, onClick = { haptic.click(); onSettingsSelected() }, onAddSubfolder = null, onRename = {}, onDelete = {}, haptic = haptic, iconOverride = Icons.Default.Settings)
             }
         }
     }
@@ -162,17 +167,17 @@ fun SideMenu(
 
 @Composable
 fun FolderTreeNode(
-    node: FolderNode, currentFolder: String, depth: Int, onFolderSelected: (String) -> Unit, onAddSubfolder: (String) -> Unit, onRename: (String, String) -> Unit, onDelete: (String) -> Unit
+    node: FolderNode, currentFolder: String, depth: Int, onFolderSelected: (String) -> Unit, onAddSubfolder: (String) -> Unit, onRename: (String, String) -> Unit, onDelete: (String) -> Unit, haptic: HapticManager
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     SideMenuItem(
         text = node.folder.name, isSelected = currentFolder == node.folder.path, depth = depth, hasChildren = node.children.isNotEmpty(), isExpanded = isExpanded, canEdit = true,
-        onToggleExpand = { isExpanded = !isExpanded }, onClick = { onFolderSelected(node.folder.path) }, onAddSubfolder = { onAddSubfolder(node.folder.path) },
-        onRename = { onRename(node.folder.path, node.folder.name) }, onDelete = { onDelete(node.folder.path) }
+        onToggleExpand = { haptic.tick(); isExpanded = !isExpanded }, onClick = { haptic.click(); onFolderSelected(node.folder.path) }, onAddSubfolder = { onAddSubfolder(node.folder.path) },
+        onRename = { onRename(node.folder.path, node.folder.name) }, onDelete = { onDelete(node.folder.path) }, haptic = haptic
     )
     AnimatedVisibility(visible = isExpanded) {
         Column {
-            node.children.forEach { childNode -> FolderTreeNode(node = childNode, currentFolder = currentFolder, depth = depth + 1, onFolderSelected = onFolderSelected, onAddSubfolder = onAddSubfolder, onRename = onRename, onDelete = onDelete) }
+            node.children.forEach { childNode -> FolderTreeNode(node = childNode, currentFolder = currentFolder, depth = depth + 1, onFolderSelected = onFolderSelected, onAddSubfolder = onAddSubfolder, onRename = onRename, onDelete = onDelete, haptic = haptic) }
         }
     }
 }
@@ -180,7 +185,7 @@ fun FolderTreeNode(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SideMenuItem(
-    text: String, isSelected: Boolean, depth: Int, hasChildren: Boolean, isExpanded: Boolean, canEdit: Boolean, onToggleExpand: () -> Unit, onClick: () -> Unit, onAddSubfolder: (() -> Unit)?, onRename: () -> Unit, onDelete: () -> Unit, iconOverride: androidx.compose.ui.graphics.vector.ImageVector? = null
+    text: String, isSelected: Boolean, depth: Int, hasChildren: Boolean, isExpanded: Boolean, canEdit: Boolean, onToggleExpand: () -> Unit, onClick: () -> Unit, onAddSubfolder: (() -> Unit)?, onRename: () -> Unit, onDelete: () -> Unit, haptic: HapticManager, iconOverride: androidx.compose.ui.graphics.vector.ImageVector? = null
 ) {
     val backgroundColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
     val contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
@@ -189,7 +194,10 @@ private fun SideMenuItem(
     Box {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = (depth * 16).dp, top = 4.dp, bottom = 4.dp).clip(RoundedCornerShape(32.dp)).background(backgroundColor)
-                .combinedClickable(onClick = onClick, onLongClick = if (canEdit) { { showMenu = true } } else null).padding(horizontal = 16.dp, vertical = 12.dp),
+                .combinedClickable(
+                    onClick = onClick, 
+                    onLongClick = if (canEdit) { { haptic.selection(); showMenu = true } } else null
+                ).padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (hasChildren) {

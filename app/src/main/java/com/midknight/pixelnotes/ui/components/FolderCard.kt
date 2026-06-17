@@ -28,9 +28,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.midknight.pixelnotes.data.FolderEntity
+import com.midknight.pixelnotes.domain.HapticManager
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -41,6 +43,8 @@ fun FolderCard(
     onDeleteClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val haptic = remember { HapticManager(context) }
     var showMenu by remember { mutableStateOf(false) }
 
     Card(
@@ -48,8 +52,14 @@ fun FolderCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(32.dp))
             .combinedClickable(
-                onClick = onClick,
-                onLongClick = { showMenu = true }
+                onClick = {
+                    haptic.click()
+                    onClick()
+                },
+                onLongClick = {
+                    haptic.selection()
+                    showMenu = true
+                }
             ),
         shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.cardColors(

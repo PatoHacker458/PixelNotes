@@ -89,7 +89,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -117,9 +116,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
@@ -152,11 +154,11 @@ import com.midknight.pixelnotes.ui.components.DrawingCanvas
 import com.midknight.pixelnotes.ui.components.ExpressiveIconButton
 import com.midknight.pixelnotes.ui.viewmodels.DrawingTool
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
+import com.midknight.pixelnotes.domain.HapticManager
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.abs
 
 @Composable
 fun PdfPageBackground(pdfPath: String, pageIndex: Int) {
@@ -212,12 +214,11 @@ fun DrawingScreen(viewModel: NotesViewModel) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val customFonts by viewModel.customFonts.collectAsState()
+    val haptic = remember { HapticManager(context) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event -> 
             if (event == Lifecycle.Event.ON_STOP) { 
-                // Only auto-save if we aren't currently performing a cloud sync or restore
-                // This prevents "Connection Pool Closed" crashes during sign-out/restore
                 if (!viewModel.isNoteBlank() && !viewModel.isSyncing) { 
                     viewModel.saveCurrentNote(SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date())) 
                 } 
@@ -517,7 +518,10 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                         }
                                         .pointerInput(audio.id) {
                                             detectTapGestures(
-                                                onTap = { viewModel.playAudio(audio.uri, audio.id, 0) }
+                                                onTap = { 
+                                                    haptic.click()
+                                                    viewModel.playAudio(audio.uri, audio.id, 0) 
+                                                }
                                             )
                                         },
                                     contentAlignment = Alignment.Center
@@ -647,7 +651,10 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                                                 }
                                                 .pointerInput(audio.id) {
                                                     detectTapGestures(
-                                                        onTap = { viewModel.playAudio(audio.uri, audio.id, index) }
+                                                        onTap = { 
+                                                            haptic.click()
+                                                            viewModel.playAudio(audio.uri, audio.id, index) 
+                                                        }
                                                     )
                                                 },
                                             contentAlignment = Alignment.Center
@@ -736,7 +743,10 @@ fun DrawingScreen(viewModel: NotesViewModel) {
                     }
 else {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            IconButton(onClick = { if (viewModel.isPlaying) viewModel.pauseAudio() else viewModel.resumeAudio() }) {
+                            IconButton(onClick = { 
+                                haptic.click()
+                                if (viewModel.isPlaying) viewModel.pauseAudio() else viewModel.resumeAudio() 
+                            }) {
                                 Icon(if (viewModel.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null)
                             }
                             Column(modifier = Modifier.weight(1f)) {
@@ -754,10 +764,16 @@ else {
                                     Text(String.format(Locale.getDefault(), "%02d:%02d", totalM, totalS), style = MaterialTheme.typography.labelSmall)
                                 }
                             }
-                            IconButton(onClick = { viewModel.deleteAudioNote(viewModel.activeAudioPageIndex, viewModel.activeAudioId ?: "") }) {
+                            IconButton(onClick = { 
+                                haptic.click()
+                                viewModel.deleteAudioNote(viewModel.activeAudioPageIndex, viewModel.activeAudioId ?: "") 
+                            }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                             }
-                            IconButton(onClick = { viewModel.stopAudio() }) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                            IconButton(onClick = { 
+                                haptic.click()
+                                viewModel.stopAudio() 
+                            }) { Icon(Icons.Default.Close, contentDescription = "Close") }
                         }
                     }
                 }
@@ -776,111 +792,153 @@ else {
                 Spacer(modifier = Modifier.width(8.dp))
 
                 val topBarScrollState = rememberScrollState()
-                Row(modifier = Modifier.weight(1f).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).pointerInput(Unit){}.horizontalScroll(topBarScrollState).padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (!viewModel.isCurrentNoteInfinite) {
-                        ExpressiveIconButton(
-                            icon = Icons.Filled.Layers,
-                            contentDescription = "Pages",
-                            onClick = { showPagesPanel = !showPagesPanel },
-                            contentColor = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        ExpressiveIconButton(
-                            icon = if (showBottomBar) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                            contentDescription = "Toggle Toolbar",
-                            onClick = { showBottomBar = !showBottomBar },
-                            contentColor = if (showBottomBar) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
-                        Spacer(modifier = Modifier.width(4.dp))
-                    } else {
-                        ExpressiveIconButton(
-                            icon = if (showBottomBar) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                            contentDescription = "Toggle Toolbar",
-                            onClick = { showBottomBar = !showBottomBar },
-                            contentColor = if (showBottomBar) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-                    ExpressiveIconButton(
-                        icon = if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool,
-                        contentDescription = "Toggle Finger/Stylus",
-                        onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled },
-                        contentColor = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                    )
+                
+                Spacer(modifier = Modifier.weight(1f))
 
-                    Box {
-                        val paperIcon = when (if (viewModel.currentPages.isNotEmpty()) viewModel.currentPages[viewModel.activePageIndex].paperStyle else 0) {
-                            1 -> Icons.Filled.ViewHeadline
-                            2 -> Icons.Filled.GridOn
-                            3 -> Icons.Filled.Grain
-                            else -> Icons.Filled.CheckBoxOutlineBlank
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = if (isSmallScreen) screenWidth.dp - 150.dp else screenWidth.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                        .pointerInput(Unit) {}
+                        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                        .drawWithContent {
+                            drawContent()
+                            val leftStrength = (topBarScrollState.value.toFloat() / 80f).coerceIn(0f, 1f)
+                            val rightStrength = ((topBarScrollState.maxValue - topBarScrollState.value).toFloat() / 80f).coerceIn(0f, 1f)
+
+                            // Continuous Alpha Mask for Left Edge
+                            drawRect(
+                                brush = Brush.horizontalGradient(
+                                    0f to Color.Black.copy(alpha = 1f - leftStrength),
+                                    0.25f to Color.Black,
+                                    startX = 0f, endX = size.width
+                                ),
+                                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn
+                            )
+                            // Continuous Alpha Mask for Right Edge
+                            drawRect(
+                                brush = Brush.horizontalGradient(
+                                    0.75f to Color.Black,
+                                    1f to Color.Black.copy(alpha = 1f - rightStrength),
+                                    startX = 0f, endX = size.width
+                                ),
+                                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn
+                            )
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(topBarScrollState).padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        if (!viewModel.isCurrentNoteInfinite) {
+                            ExpressiveIconButton(
+                                icon = Icons.Filled.Layers,
+                                contentDescription = "Pages",
+                                onClick = { showPagesPanel = !showPagesPanel },
+                                contentColor = if (showPagesPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            ExpressiveIconButton(
+                                icon = if (showBottomBar) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                contentDescription = "Toggle Toolbar",
+                                onClick = { showBottomBar = !showBottomBar },
+                                contentColor = if (showBottomBar) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
+                            Spacer(modifier = Modifier.width(4.dp))
+                        } else {
+                            ExpressiveIconButton(
+                                icon = if (showBottomBar) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                contentDescription = "Toggle Toolbar",
+                                onClick = { showBottomBar = !showBottomBar },
+                                contentColor = if (showBottomBar) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)))
+                            Spacer(modifier = Modifier.width(4.dp))
                         }
                         ExpressiveIconButton(
-                            icon = paperIcon,
-                            contentDescription = "Paper Style",
-                            onClick = { showPaperMenu = true }
+                            icon = if (viewModel.fingerDrawingEnabled) Icons.Filled.TouchApp else Icons.Filled.PanTool,
+                            contentDescription = "Toggle Finger/Stylus",
+                            onClick = { viewModel.fingerDrawingEnabled = !viewModel.fingerDrawingEnabled },
+                            contentColor = if (viewModel.fingerDrawingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
-                        DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
-                            DropdownMenuItem(text = { Text("Blank", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.CheckBoxOutlineBlank, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(0); showPaperMenu = false })
-                            DropdownMenuItem(text = { Text("Lined", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.ViewHeadline, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(1); showPaperMenu = false })
-                            DropdownMenuItem(text = { Text("Grid", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.GridOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(2); showPaperMenu = false })
-                            DropdownMenuItem(text = { Text("Dotted", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Grain, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(3); showPaperMenu = false })
+
+                        Box {
+                            val paperIcon = when (if (viewModel.currentPages.isNotEmpty()) viewModel.currentPages[viewModel.activePageIndex].paperStyle else 0) {
+                                1 -> Icons.Filled.ViewHeadline
+                                2 -> Icons.Filled.GridOn
+                                3 -> Icons.Filled.Grain
+                                else -> Icons.Filled.CheckBoxOutlineBlank
+                            }
+                            ExpressiveIconButton(
+                                icon = paperIcon,
+                                contentDescription = "Paper Style",
+                                onClick = { showPaperMenu = true }
+                            )
+                            DropdownMenu(expanded = showPaperMenu, onDismissRequest = { showPaperMenu = false }) {
+                                DropdownMenuItem(text = { Text("Blank", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.CheckBoxOutlineBlank, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(0); showPaperMenu = false })
+                                DropdownMenuItem(text = { Text("Lined", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.ViewHeadline, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(1); showPaperMenu = false })
+                                DropdownMenuItem(text = { Text("Grid", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.GridOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(2); showPaperMenu = false })
+                                DropdownMenuItem(text = { Text("Dotted", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Grain, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { viewModel.updateActivePagePaperStyle(3); showPaperMenu = false })
+                            }
                         }
-                    }
 
-                    Box {
-                        ExpressiveIconButton(
-                            icon = Icons.Filled.FormatColorFill,
-                            contentDescription = "Canvas Color",
-                            onClick = { showCanvasColorMenu = true }
-                        )
-                        DropdownMenu(expanded = showCanvasColorMenu, onDismissRequest = { showCanvasColorMenu = false }) {
-                            canvasColors.forEach { colorArgb -> DropdownMenuItem(text = { Text(if (colorArgb == -1) "Default White" else "Solid Color", fontWeight = FontWeight.Bold) }, trailingIcon = { Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(if (colorArgb == -1) Color.White else Color(colorArgb)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)) }, onClick = { viewModel.updateActivePageCanvasColor(colorArgb); showCanvasColorMenu = false }) }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                            DropdownMenuItem(text = { Text("Set Page Background", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Wallpaper, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showCanvasColorMenu = false; backgroundPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-                            DropdownMenuItem(text = { Text("Clear Background", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.LayersClear, contentDescription = null, tint = MaterialTheme.colorScheme.error) }, onClick = { showCanvasColorMenu = false; viewModel.updateActivePageBackground(null) })
+                        Box {
+                            ExpressiveIconButton(
+                                icon = Icons.Filled.FormatColorFill,
+                                contentDescription = "Canvas Color",
+                                onClick = { showCanvasColorMenu = true }
+                            )
+                            DropdownMenu(expanded = showCanvasColorMenu, onDismissRequest = { showCanvasColorMenu = false }) {
+                                canvasColors.forEach { colorArgb -> DropdownMenuItem(text = { Text(if (colorArgb == -1) "Default White" else "Solid Color", fontWeight = FontWeight.Bold) }, trailingIcon = { Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(if (colorArgb == -1) Color.White else Color(colorArgb)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)) }, onClick = { viewModel.updateActivePageCanvasColor(colorArgb); showCanvasColorMenu = false }) }
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                DropdownMenuItem(text = { Text("Set Page Background", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Wallpaper, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showCanvasColorMenu = false; backgroundPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+                                DropdownMenuItem(text = { Text("Clear Background", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.LayersClear, contentDescription = null, tint = MaterialTheme.colorScheme.error) }, onClick = { showCanvasColorMenu = false; viewModel.updateActivePageBackground(null) })
+                            }
                         }
-                    }
 
-                    Box {
-                        ExpressiveIconButton(
-                            icon = Icons.Filled.Add,
-                            contentDescription = "Add Content",
-                            onClick = { showAddMenu = true }
-                        )
-                        DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
-                            DropdownMenuItem(text = { Text("Import PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; pdfImportLauncher.launch("application/pdf") })
-                            DropdownMenuItem(text = { Text("Insert Image", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; floatingImagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-                            DropdownMenuItem(text = { Text("Take Photo", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PhotoCamera, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; viewModel.pendingCameraUri = viewModel.createImageUri(context); viewModel.pendingCameraUri?.let { cameraLauncher.launch(it) } })
-                            DropdownMenuItem(text = { Text("Record Audio", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO) })
+                        Box {
+                            ExpressiveIconButton(
+                                icon = Icons.Filled.Add,
+                                contentDescription = "Add Content",
+                                onClick = { showAddMenu = true }
+                            )
+                            DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
+                                DropdownMenuItem(text = { Text("Import PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; pdfImportLauncher.launch("application/pdf") })
+                                DropdownMenuItem(text = { Text("Insert Image", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; floatingImagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+                                DropdownMenuItem(text = { Text("Take Photo", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PhotoCamera, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; viewModel.pendingCameraUri = viewModel.createImageUri(context); viewModel.pendingCameraUri?.let { cameraLauncher.launch(it) } })
+                                DropdownMenuItem(text = { Text("Record Audio", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showAddMenu = false; micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO) })
+                            }
                         }
-                    }
 
-                    ExpressiveIconButton(
-                        icon = Icons.AutoMirrored.Filled.Undo,
-                        contentDescription = "Undo",
-                        onClick = { viewModel.undo() }
-                    )
-                    ExpressiveIconButton(
-                        icon = Icons.AutoMirrored.Filled.Redo,
-                        contentDescription = "Redo",
-                        onClick = { viewModel.redo() }
-                    )
-
-                    Box {
                         ExpressiveIconButton(
-                            icon = Icons.Filled.IosShare,
-                            contentDescription = "Share",
-                            onClick = { showExportMenu = true }
+                            icon = Icons.AutoMirrored.Filled.Undo,
+                            contentDescription = "Undo",
+                            onClick = { viewModel.undo() }
                         )
-                        DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
-                            DropdownMenuItem(text = { Text("Export as PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
-                            DropdownMenuItem(text = { Text("Export as Pixel Note", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; pxNoteExportLauncher.launch("${viewModel.currentTitle}.pxnote") })
-                            if (!viewModel.isCurrentNoteInfinite) { DropdownMenuItem(text = { Text("Export Current Page", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.InsertPageBreak, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; singlePageToExport = viewModel.currentPages[viewModel.activePageIndex]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${viewModel.activePageIndex + 1}.pdf") }) }
+                        ExpressiveIconButton(
+                            icon = Icons.AutoMirrored.Filled.Redo,
+                            contentDescription = "Redo",
+                            onClick = { viewModel.redo() }
+                        )
+
+                        Box {
+                            ExpressiveIconButton(
+                                icon = Icons.Filled.IosShare,
+                                contentDescription = "Share",
+                                onClick = { showExportMenu = true }
+                            )
+                            DropdownMenu(expanded = showExportMenu, onDismissRequest = { showExportMenu = false }) {
+                                DropdownMenuItem(text = { Text("Export as PDF", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; val currentDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date()); pdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_$currentDate.pdf") })
+                                DropdownMenuItem(text = { Text("Export as Pixel Note", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; pxNoteExportLauncher.launch("${viewModel.currentTitle}.pxnote") })
+                                if (!viewModel.isCurrentNoteInfinite) { DropdownMenuItem(text = { Text("Export Current Page", fontWeight = FontWeight.Bold) }, trailingIcon = { Icon(Icons.Filled.InsertPageBreak, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }, onClick = { showExportMenu = false; singlePageToExport = viewModel.currentPages[viewModel.activePageIndex]; singlePdfLauncher.launch("${viewModel.currentTitle.replace(" ", "_")}_Page_${viewModel.activePageIndex + 1}.pdf") }) }
+                            }
                         }
                     }
                 }
@@ -894,101 +952,172 @@ else {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     AnimatedVisibility(visible = showToolOptions, enter = expandVertically(), exit = shrinkVertically()) {
-                        Row(modifier = Modifier.padding(bottom = 16.dp).widthIn(max = screenWidth.dp - 32.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)).pointerInput(Unit){}.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            val optionsScrollState = rememberScrollState()
-                            Row(modifier = Modifier.weight(1f, fill = false).horizontalScroll(optionsScrollState).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) {
-                                    colors.forEach { color ->
-                                        Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color })
+                        val optionsScrollState = rememberScrollState()
+                        Row(
+                            modifier = Modifier
+                                .padding(bottom = 16.dp)
+                                .widthIn(max = screenWidth.dp - 32.dp)
+                                .clip(RoundedCornerShape(32.dp))
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+                                .pointerInput(Unit) {}
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            // Masked Area for scrollable items
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                                    .drawWithContent {
+                                        drawContent()
+                                        val leftStrength = (optionsScrollState.value.toFloat() / 80f).coerceIn(0f, 1f)
+                                        val rightStrength = ((optionsScrollState.maxValue - optionsScrollState.value).toFloat() / 80f).coerceIn(0f, 1f)
+
+                                        // Continuous Alpha Mask for Left Edge
+                                        drawRect(
+                                            brush = Brush.horizontalGradient(
+                                                0f to Color.Black.copy(alpha = 1f - leftStrength),
+                                                0.25f to Color.Black,
+                                                startX = 0f, endX = size.width
+                                            ),
+                                            blendMode = androidx.compose.ui.graphics.BlendMode.DstIn
+                                        )
+                                        // Continuous Alpha Mask for Right Edge
+                                        drawRect(
+                                            brush = Brush.horizontalGradient(
+                                                0.75f to Color.Black,
+                                                1f to Color.Black.copy(alpha = 1f - rightStrength),
+                                                startX = 0f, endX = size.width
+                                            ),
+                                            blendMode = androidx.compose.ui.graphics.BlendMode.DstIn
+                                        )
                                     }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                    Slider(value = viewModel.currentStrokeWidth, onValueChange = { viewModel.currentStrokeWidth = it }, valueRange = 4f..40f, modifier = Modifier.width(100.dp))
-                                }
-                                else if (viewModel.currentTool == DrawingTool.ERASER) {
-                                    Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
-                                    Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
-                                    if (viewModel.eraserType == 0) {
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("${(viewModel.currentEraserWidth / 100f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                        Slider(value = viewModel.currentEraserWidth, onValueChange = { viewModel.currentEraserWidth = it }, valueRange = 10f..100f, modifier = Modifier.width(100.dp))
-                                    }
-                                }
-                                else if (viewModel.currentTool == DrawingTool.SELECTION) {
-                                    if (viewModel.selectedStrokes.isNotEmpty() || viewModel.selectedTexts.isNotEmpty()) {
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .horizontalScroll(optionsScrollState)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically, 
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    if (viewModel.currentTool == DrawingTool.PEN || viewModel.currentTool == DrawingTool.HIGHLIGHTER) {
                                         colors.forEach { color ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(32.dp)
-                                                    .clip(CircleShape)
-                                                    .background(color)
-                                                    .border(width = 1.dp, color = Color.Transparent, shape = CircleShape)
-                                                    .clickable { viewModel.changeSelectionColor(color.toArgb()) }
+                                            Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color })
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("${(viewModel.currentStrokeWidth / 40f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        Slider(
+                                            value = viewModel.currentStrokeWidth, 
+                                            onValueChange = { 
+                                                if (it.toInt() != viewModel.currentStrokeWidth.toInt()) haptic.tick()
+                                                viewModel.currentStrokeWidth = it 
+                                            }, 
+                                            valueRange = 4f..40f, 
+                                            modifier = Modifier.width(100.dp)
+                                        )
+                                    }
+                                    else if (viewModel.currentTool == DrawingTool.ERASER) {
+                                        Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { haptic.click(); viewModel.eraserType = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Normal", color = if (viewModel.eraserType == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                        Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.eraserType == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { haptic.click(); viewModel.eraserType = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Stroke", color = if (viewModel.eraserType == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                        if (viewModel.eraserType == 0) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("${(viewModel.currentEraserWidth / 100f * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                            Slider(
+                                                value = viewModel.currentEraserWidth, 
+                                                onValueChange = { 
+                                                    if (it.toInt() != viewModel.currentEraserWidth.toInt()) haptic.tick()
+                                                    viewModel.currentEraserWidth = it 
+                                                }, 
+                                                valueRange = 10f..100f, 
+                                                modifier = Modifier.width(100.dp)
                                             )
                                         }
-                                        
-                                        if (viewModel.selectedTexts.isNotEmpty()) {
-                                            IconButton(onClick = { 
-                                                val textToEdit = viewModel.selectedTexts.first()
-                                                textEditPageIndex = viewModel.selectionPageIndex
-                                                editingTextData = textToEdit
-                                                currentTextInput = textToEdit.text
-                                                selectedFontName = textToEdit.fontName
-                                                isTextEditing = true
-                                            }) {
-                                                Icon(Icons.Filled.Edit, contentDescription = "Edit Selected Text")
+                                    }
+                                    else if (viewModel.currentTool == DrawingTool.SELECTION) {
+                                        if (viewModel.selectedStrokes.isNotEmpty() || viewModel.selectedTexts.isNotEmpty()) {
+                                            colors.forEach { color ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(CircleShape)
+                                                        .background(color)
+                                                        .border(width = 1.dp, color = Color.Transparent, shape = CircleShape)
+                                                        .clickable { viewModel.changeSelectionColor(color.toArgb()) }
+                                                )
                                             }
-
-                                            var showFontMenu by remember { mutableStateOf(false) }
-                                            Box {
-                                                IconButton(onClick = { showFontMenu = true }) {
-                                                    Icon(Icons.Filled.Title, contentDescription = "Change Selection Font")
+                                            
+                                            if (viewModel.selectedTexts.isNotEmpty()) {
+                                                IconButton(onClick = { 
+                                                    val textToEdit = viewModel.selectedTexts.first()
+                                                    textEditPageIndex = viewModel.selectionPageIndex
+                                                    editingTextData = textToEdit
+                                                    currentTextInput = textToEdit.text
+                                                    selectedFontName = textToEdit.fontName
+                                                    isTextEditing = true
+                                                }) {
+                                                    Icon(Icons.Filled.Edit, contentDescription = "Edit Selected Text")
                                                 }
-                                                DropdownMenu(expanded = showFontMenu, onDismissRequest = { showFontMenu = false }) {
-                                                    val allFontNames = listOf("Default", "Serif", "Monospace", "Cursive") + customFonts.map { it.name }
-                                                    allFontNames.forEach { fontName ->
-                                                        DropdownMenuItem(
-                                                            text = { 
-                                                                val fontInfo = customFonts.find { it.name == fontName }
-                                                                val tf = com.midknight.pixelnotes.domain.TypefaceManager.getTypeface(context, fontName, fontInfo?.fileName)
-                                                                Text(fontName, fontFamily = FontFamily(tf)) 
-                                                            },
-                                                            onClick = {
-                                                                viewModel.changeSelectionFont(fontName)
-                                                                showFontMenu = false
-                                                            }
-                                                        )
+
+                                                var showFontMenu by remember { mutableStateOf(false) }
+                                                Box {
+                                                    IconButton(onClick = { showFontMenu = true }) {
+                                                        Icon(Icons.Filled.Title, contentDescription = "Change Selection Font")
+                                                    }
+                                                    DropdownMenu(expanded = showFontMenu, onDismissRequest = { showFontMenu = false }) {
+                                                        val allFontNames = listOf("Default", "Serif", "Monospace", "Cursive") + customFonts.map { it.name }
+                                                        allFontNames.forEach { fontName ->
+                                                            DropdownMenuItem(
+                                                                text = { 
+                                                                    val fontInfo = customFonts.find { it.name == fontName }
+                                                                    val tf = com.midknight.pixelnotes.domain.TypefaceManager.getTypeface(context, fontName, fontInfo?.fileName)
+                                                                    Text(fontName, fontFamily = FontFamily(tf)) 
+                                                                },
+                                                                onClick = {
+                                                                    viewModel.changeSelectionFont(fontName)
+                                                                    showFontMenu = false
+                                                                }
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
+                                            
+                                            IconButton(onClick = { viewModel.deleteSelection() }) {
+                                                Icon(Icons.Filled.DeleteSweep, contentDescription = "Delete Selection", tint = MaterialTheme.colorScheme.error)
+                                            }
+                                        } else {
+                                            Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Free Form", color = if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                            Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Rectangle", color = if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
                                         }
-                                        
-                                        IconButton(onClick = { viewModel.deleteSelection() }) {
-                                            Icon(Icons.Filled.DeleteSweep, contentDescription = "Delete Selection", tint = MaterialTheme.colorScheme.error)
+                                    }
+                                    else if (viewModel.currentTool == DrawingTool.TEXT) {
+                                        var fontMenuExpanded by remember { mutableStateOf(false) }
+                                        Box { 
+                                            Text(text = viewModel.currentFontName, modifier = Modifier.clickable { haptic.click(); fontMenuExpanded = true }.padding(8.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                            DropdownMenu(expanded = fontMenuExpanded, onDismissRequest = { fontMenuExpanded = false }) { 
+                                                DropdownMenuItem(text = { Text("Default") }, onClick = { haptic.click(); viewModel.currentFontName = "Default"; fontMenuExpanded = false })
+                                                DropdownMenuItem(text = { Text("Serif") }, onClick = { haptic.click(); viewModel.currentFontName = "Serif"; fontMenuExpanded = false })
+                                                DropdownMenuItem(text = { Text("Monospace") }, onClick = { haptic.click(); viewModel.currentFontName = "Monospace"; fontMenuExpanded = false })
+                                                DropdownMenuItem(text = { Text("Cursive") }, onClick = { haptic.click(); viewModel.currentFontName = "Cursive"; fontMenuExpanded = false })
+                                                customFonts.forEach { font -> DropdownMenuItem(text = { Text(font.name) }, onClick = { haptic.click(); viewModel.currentFontName = font.name; fontMenuExpanded = false }) }
+                                                DropdownMenuItem(text = { Text("+ Manage Fonts", color = MaterialTheme.colorScheme.primary) }, onClick = { haptic.click(); fontMenuExpanded = false; viewModel.closeEditing(); viewModel.currentScreen = 2 }) 
+                                            } 
                                         }
-                                    } else {
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 0 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Free Form", color = if (viewModel.selectionMode == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
-                                        Box(modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.primary else Color.Transparent).clickable { viewModel.selectionMode = 1 }.padding(horizontal = 16.dp, vertical = 8.dp)) { Text("Rectangle", color = if (viewModel.selectionMode == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { haptic.click(); viewModel.currentColor = color }) }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("${viewModel.currentTextSize.toInt()}px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        Slider(
+                                            value = viewModel.currentTextSize, 
+                                            onValueChange = { 
+                                                if (it.toInt() != viewModel.currentTextSize.toInt()) haptic.tick()
+                                                viewModel.currentTextSize = it 
+                                            }, 
+                                            valueRange = 10f..150f, 
+                                            modifier = Modifier.width(100.dp)
+                                        )
                                     }
-                                }
-                                else if (viewModel.currentTool == DrawingTool.TEXT) {
-                                    var fontMenuExpanded by remember { mutableStateOf(false) }
-                                    Box { 
-                                        Text(text = viewModel.currentFontName, modifier = Modifier.clickable { fontMenuExpanded = true }.padding(8.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                        DropdownMenu(expanded = fontMenuExpanded, onDismissRequest = { fontMenuExpanded = false }) { 
-                                            DropdownMenuItem(text = { Text("Default") }, onClick = { viewModel.currentFontName = "Default"; fontMenuExpanded = false })
-                                            DropdownMenuItem(text = { Text("Serif") }, onClick = { viewModel.currentFontName = "Serif"; fontMenuExpanded = false })
-                                            DropdownMenuItem(text = { Text("Monospace") }, onClick = { viewModel.currentFontName = "Monospace"; fontMenuExpanded = false })
-                                            DropdownMenuItem(text = { Text("Cursive") }, onClick = { viewModel.currentFontName = "Cursive"; fontMenuExpanded = false })
-                                            customFonts.forEach { font -> DropdownMenuItem(text = { Text(font.name) }, onClick = { viewModel.currentFontName = font.name; fontMenuExpanded = false }) }
-                                            DropdownMenuItem(text = { Text("+ Manage Fonts", color = MaterialTheme.colorScheme.primary) }, onClick = { fontMenuExpanded = false; viewModel.closeEditing(); viewModel.currentScreen = 2 }) 
-                                        } 
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    colors.forEach { color -> Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(color).border(width = if (viewModel.currentColor == color) 2.dp else 1.dp, color = if (viewModel.currentColor == color) MaterialTheme.colorScheme.primary else Color.Transparent, shape = CircleShape).clickable { viewModel.currentColor = color }) }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("${viewModel.currentTextSize.toInt()}px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                    Slider(value = viewModel.currentTextSize, onValueChange = { viewModel.currentTextSize = it }, valueRange = 10f..150f, modifier = Modifier.width(100.dp))
                                 }
                             }
                             IconButton(onClick = { showToolOptions = false }, modifier = Modifier.padding(end = 8.dp)) { Icon(Icons.Filled.Close, contentDescription = null) }

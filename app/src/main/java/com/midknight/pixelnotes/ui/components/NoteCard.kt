@@ -32,7 +32,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.remember
 import com.midknight.pixelnotes.data.NoteWithPages
+import com.midknight.pixelnotes.domain.HapticManager
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -43,6 +46,8 @@ fun NoteCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val haptic = remember { HapticManager(context) }
     val scale by animateFloatAsState(targetValue = if (isSelected) 0.95f else 1f, label = "ScaleAnimation")
     val note = noteWithPages.note
 
@@ -57,8 +62,14 @@ fun NoteCard(
             )
             .clip(RoundedCornerShape(32.dp))
             .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
+                onClick = {
+                    haptic.click()
+                    onClick()
+                },
+                onLongClick = {
+                    haptic.selection()
+                    onLongClick()
+                }
             ),
         shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.cardColors(

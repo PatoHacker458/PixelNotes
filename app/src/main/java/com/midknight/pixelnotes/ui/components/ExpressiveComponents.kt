@@ -41,8 +41,9 @@ import androidx.graphics.shapes.RoundedPolygon
 import androidx.graphics.shapes.circle
 import androidx.graphics.shapes.star
 import androidx.graphics.shapes.toPath
+import com.midknight.pixelnotes.domain.HapticManager
+import androidx.compose.ui.platform.LocalContext
 
-// 1. MorphPolygonShape limpio: Solo para botones 1:1 (Iconos y FABs circulares)
 class MorphPolygonShape(
     private val morph: Morph,
     private val percentage: Float
@@ -55,7 +56,6 @@ class MorphPolygonShape(
         val path = morph.toPath(percentage).asComposePath()
         val matrix = android.graphics.Matrix()
 
-        // Escala simétrica basada en el lado más corto para no deformar
         val scale = minOf(size.width, size.height) / 2f
         matrix.postScale(scale, scale)
         matrix.postTranslate(size.width / 2f, size.height / 2f)
@@ -67,7 +67,6 @@ class MorphPolygonShape(
     }
 }
 
-// 2. Botones cuadrados (Usan la figura polígonal perfecta)
 @Composable
 fun ExpressiveIconButton(
     icon: ImageVector,
@@ -79,12 +78,14 @@ fun ExpressiveIconButton(
     size: Dp = 48.dp,
     iconSize: Dp = 24.dp
 ) {
+    val context = LocalContext.current
     val shapeA = remember { RoundedPolygon.circle() }
     val shapeB = remember { RoundedPolygon.star(numVerticesPerRadius = 8, innerRadius = 0.75f, rounding = CornerRounding(0.2f)) }
     val morph = remember { Morph(shapeA, shapeB) }
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    val haptic = remember { HapticManager(context) }
 
     val progress by animateFloatAsState(
         targetValue = if (isPressed) 1f else 0f,
@@ -97,7 +98,10 @@ fun ExpressiveIconButton(
             .size(size)
             .clip(MorphPolygonShape(morph, progress))
             .background(containerColor)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+            .clickable(interactionSource = interactionSource, indication = null, onClick = { 
+                haptic.click()
+                onClick() 
+            }),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -117,12 +121,14 @@ fun ExpressiveFAB(
     containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
     contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
 ) {
+    val context = LocalContext.current
     val shapeA = remember { RoundedPolygon.circle() }
     val shapeB = remember { RoundedPolygon.star(numVerticesPerRadius = 12, innerRadius = 0.85f, rounding = CornerRounding(0.2f)) }
     val morph = remember { Morph(shapeA, shapeB) }
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    val haptic = remember { HapticManager(context) }
 
     val progress by animateFloatAsState(
         targetValue = if (isPressed) 1f else 0f,
@@ -135,7 +141,10 @@ fun ExpressiveFAB(
             .size(56.dp)
             .clip(MorphPolygonShape(morph, progress))
             .background(containerColor)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+            .clickable(interactionSource = interactionSource, indication = null, onClick = {
+                haptic.heavyClick()
+                onClick()
+            }),
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -147,7 +156,6 @@ fun ExpressiveFAB(
     }
 }
 
-// 3. Botones Rectangulares (Arreglados con RoundedCornerShape nativo)
 @Composable
 fun ExpressiveExtendedFAB(
     icon: ImageVector,
@@ -157,10 +165,11 @@ fun ExpressiveExtendedFAB(
     containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
     contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer
 ) {
+    val context = LocalContext.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    val haptic = remember { HapticManager(context) }
 
-    // Animamos los DP de las esquinas en lugar de un polígono
     val cornerRadius by animateDpAsState(
         targetValue = if (isPressed) 8.dp else 28.dp,
         animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f),
@@ -171,7 +180,10 @@ fun ExpressiveExtendedFAB(
         modifier = modifier
             .clip(RoundedCornerShape(cornerRadius))
             .background(containerColor)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = {
+                haptic.heavyClick()
+                onClick()
+            })
             .padding(horizontal = 20.dp, vertical = 16.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -202,8 +214,10 @@ fun ExpressiveButton(
     contentColor: Color = MaterialTheme.colorScheme.onPrimary,
     isSquareEdge: Boolean = false
 ) {
+    val context = LocalContext.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    val haptic = remember { HapticManager(context) }
 
     // Ajuste dinámico de esquinas para mantener la estética limpia
     val defaultRadius = if (isSquareEdge) 8.dp else 24.dp
@@ -219,7 +233,10 @@ fun ExpressiveButton(
         modifier = modifier
             .clip(RoundedCornerShape(cornerRadius))
             .background(containerColor)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = {
+                haptic.click()
+                onClick()
+            })
             .padding(horizontal = 24.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
