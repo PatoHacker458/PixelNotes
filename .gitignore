@@ -1,6 +1,5 @@
 *.iml
 .gradle
-/local.properties
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
@@ -12,13 +11,12 @@
 /captures
 .externalNativeBuild
 .cxx
+
 local.properties
 secrets.properties
-# Android Signing Keys (Keystores)
+
 *.jks
 *.keystore
-
-# También protege los archivos de configuración de contraseñas locales si los usas
-local.properties
+pixelnoteskey
 
 app/release/
