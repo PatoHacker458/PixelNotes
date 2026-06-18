@@ -1,87 +1,47 @@
 package com.midknight.pixelnotes.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AllOut
-import androidx.compose.material.icons.filled.Backup
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.FileOpen
-import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.midknight.pixelnotes.data.FolderEntity
 import com.midknight.pixelnotes.data.NoteWithPages
@@ -89,6 +49,9 @@ import com.midknight.pixelnotes.domain.HapticManager
 import com.midknight.pixelnotes.ui.components.*
 import com.midknight.pixelnotes.ui.viewmodels.NotesViewModel
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,6 +94,38 @@ fun NotesScreen(
     var showFabMenu by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
 
+    // Selection and Gesture state
+    val folderBounds = remember { mutableStateMapOf<String, Rect>() }
+    val noteBounds = remember { mutableStateMapOf<Int, Rect>() }
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    var containerPositionInWindow by remember { mutableStateOf(Offset.Zero) }
+    
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var initialSelectionNotes by remember { mutableStateOf(setOf<Int>()) }
+    var initialSelectionFolders by remember { mutableStateOf(setOf<String>()) }
+    var lastGestureTime by remember { mutableLongStateOf(0L) }
+    var isGestureActive by remember { mutableStateOf(false) }
+    var isGuardActive by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(lastGestureTime) {
+        if (lastGestureTime > 0) {
+            isGuardActive = true
+            kotlinx.coroutines.delay(800)
+            isGuardActive = false
+        }
+    }
+    
+    // Smooth Autoscroll logic
+    var dragScrollDirection by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(dragScrollDirection) {
+        if (dragScrollDirection != 0f) {
+            while (true) {
+                gridState.scrollBy(dragScrollDirection)
+                kotlinx.coroutines.delay(16) // Paced at ~60fps to prevent ANR
+            }
+        }
+    }
+
     if (folderToDelete != null) {
         AlertDialog(
             onDismissRequest = { folderToDelete = null },
@@ -139,7 +134,10 @@ fun NotesScreen(
             confirmButton = { 
                 ExpressiveButton(
                     text = "Delete", 
-                    onClick = { folderToDelete?.let { onDeleteFolder(it.path) }; folderToDelete = null },
+                    onClick = { 
+                        folderToDelete?.let { onDeleteFolder(it.path) }
+                        folderToDelete = null 
+                    },
                     containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError,
                     isSquareEdge = true
@@ -148,7 +146,40 @@ fun NotesScreen(
             dismissButton = { 
                 ExpressiveButton(
                     text = "Cancel", 
-                    onClick = { folderToDelete = null },
+                    onClick = { 
+                        folderToDelete = null 
+                    },
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    isSquareEdge = true
+                )
+            }
+        )
+    }
+
+    if (folderToRename != null) {
+        AlertDialog(
+            onDismissRequest = { folderToRename = null },
+            title = { Text("Rename Folder") },
+            text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, label = { Text("New Name") }) },
+            confirmButton = { 
+                ExpressiveButton(
+                    text = "Save", 
+                    onClick = { 
+                        haptic.click()
+                        folderToRename?.let { onRenameFolder(it.path, newFolderName) }
+                        folderToRename = null 
+                    },
+                    isSquareEdge = true
+                )
+            },
+            dismissButton = { 
+                ExpressiveButton(
+                    text = "Cancel", 
+                    onClick = { 
+                        haptic.click()
+                        folderToRename = null 
+                    },
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     isSquareEdge = true
@@ -165,7 +196,10 @@ fun NotesScreen(
             confirmButton = {
                 ExpressiveButton(
                     text = "Empty Trash",
-                    onClick = { viewModel.emptyTrash() },
+                    onClick = {
+                        haptic.heavyClick()
+                        viewModel.emptyTrash()
+                    },
                     containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError,
                     isSquareEdge = true
@@ -174,7 +208,10 @@ fun NotesScreen(
             dismissButton = {
                 ExpressiveButton(
                     text = "Cancel",
-                    onClick = { viewModel.showEmptyTrashDialog = false },
+                    onClick = {
+                        haptic.click()
+                        viewModel.showEmptyTrashDialog = false
+                    },
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     isSquareEdge = true
@@ -183,57 +220,120 @@ fun NotesScreen(
         )
     }
 
-    if (folderToRename != null) {
-        AlertDialog(
-            onDismissRequest = { folderToRename = null },
-            title = { Text("Rename Folder") },
-            text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, label = { Text("New Name") }) },
-            confirmButton = { TextButton(onClick = { if (newFolderName.isNotBlank()) folderToRename?.let { onRenameFolder(it.path, newFolderName) }; folderToRename = null }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { folderToRename = null }) { Text("Cancel") } }
-        )
-    }
+    val displayedNotes = notes.filter { 
+        (currentFolder == "All Notes" && !it.note.inTrash) || (it.note.folder == currentFolder && !it.note.inTrash) || (currentFolder == "Trash" && it.note.inTrash)
+    }.filter { it.note.title.contains(searchQuery, ignoreCase = true) }
 
-    if (showProfileDialog) {
-        ProfileDialog(
-            userEmail = userEmail,
-            userName = userName,
-            userPhotoUri = userPhotoUri,
-            isSyncing = viewModel.isSyncing,
-            onDismiss = { showProfileDialog = false },
-            onSignOut = { onSignOutClick(); showProfileDialog = false },
-            onSignIn = { onSignInClick(); showProfileDialog = false },
-            onBackup = { viewModel.backupToCloud(context) },
-            onRestore = { viewModel.restoreFromCloudManual(context) },
-            onPurge = { viewModel.purgeCloudData(context) },
-            onLocalBackup = onLocalBackup,
-            onLocalRestore = onLocalRestore
-        )
-    }
+    val displayedFolders = if (currentFolder != "Trash" && searchQuery.isBlank()) {
+        folders.filter { it.parentPath == (if (currentFolder == "All Notes") null else currentFolder) }
+    } else emptyList()
 
-    val displayedFolders = if (currentFolder == "Trash") emptyList() else if (searchQuery.isNotBlank()) {
-        folders.filter { it.name.contains(searchQuery, true) }
-    } else {
-        if (currentFolder == "All Notes") folders.filter { it.parentPath == null } else folders.filter { it.parentPath == currentFolder }
-    }
-
-    val displayedNotes = if (currentFolder == "Trash") {
-        notes.filter { it.note.inTrash }
-    } else if (searchQuery.isNotBlank()) {
-        notes.filter { !it.note.inTrash && (it.note.title.contains(searchQuery, true) || it.note.content.contains(searchQuery, true)) }
-    } else {
-        if (currentFolder == "All Notes") notes.filter { !it.note.inTrash } else notes.filter { !it.note.inTrash && it.note.folder == currentFolder }
+    // Clear bounds when content changes to prevent phantom selections
+    LaunchedEffect(displayedNotes, displayedFolders) {
+        noteBounds.clear()
+        folderBounds.clear()
     }
 
     Scaffold(
+        topBar = {
+            Box(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp)) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selectedNotes.isEmpty() && viewModel.selectedFolders.isEmpty(),
+                    enter = fadeIn(tween(300)),
+                    exit = fadeOut(tween(300))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ExpressiveIconButton(icon = Icons.Default.Menu, contentDescription = "Menu", onClick = onMenuClick)
+                        
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search your notes...") },
+                            modifier = Modifier.weight(1f),
+                            colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
+                            singleLine = true
+                        )
+
+                        // Profile Picture / Account Button
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                                .clickable { showProfileDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (userPhotoUri != null) {
+                                AsyncImage(
+                                    model = userPhotoUri,
+                                    contentDescription = "Account",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(Icons.Default.Person, contentDescription = "Account", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
+                    }
+                }
+
+                // CONTEXTUAL SELECTION BAR
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selectedNotes.isNotEmpty() || viewModel.selectedFolders.isNotEmpty(),
+                    enter = fadeIn(tween(300)),
+                    exit = fadeOut(tween(300))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ExpressiveIconButton(
+                            icon = Icons.Default.Close,
+                            contentDescription = "Clear Selection",
+                            onClick = onClearSelection,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        val totalSelected = selectedNotes.size + viewModel.selectedFolders.size
+                        Text(
+                            text = "$totalSelected selected",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(start = 8.dp).weight(1f)
+                        )
+                        
+                        if (currentFolder == "Trash") {
+                            ExpressiveIconButton(icon = Icons.Default.Restore, contentDescription = "Restore", onClick = onActionRestore, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.DeleteForever, contentDescription = "Delete Permanently", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                        } else {
+                            if (selectedNotes.size == 1 && viewModel.selectedFolders.isEmpty()) {
+                                ExpressiveIconButton(icon = Icons.Default.FileUpload, contentDescription = "Export .pxnote", onClick = { onExportPxNote(selectedNotes.first()) }, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            if (viewModel.selectedFolders.isEmpty()) {
+                                ExpressiveIconButton(icon = Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move", onClick = onActionMove, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                                ExpressiveIconButton(icon = Icons.Default.PictureAsPdf, contentDescription = "Merge PDF", onClick = onActionExport, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                                ExpressiveIconButton(icon = Icons.Default.Share, contentDescription = "Share", onClick = onActionShare, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            ExpressiveIconButton(icon = Icons.Default.Delete, contentDescription = "Trash", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    }
+                }
+            }
+        },
         floatingActionButton = {
-            if (currentFolder == "Trash") {
+            if (currentFolder == "Trash" && displayedNotes.isNotEmpty()) {
                 ExpressiveFAB(
                     icon = Icons.Default.DeleteSweep,
                     onClick = { viewModel.showEmptyTrashDialog = true },
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
                 )
-            } else if (selectedNotes.isEmpty()) {
+            } else if (selectedNotes.isEmpty() && viewModel.selectedFolders.isEmpty()) {
                 Column(horizontalAlignment = Alignment.End) {
                     AnimatedVisibility(visible = showFabMenu) {
                         Column(modifier = Modifier.padding(bottom = 16.dp), horizontalAlignment = Alignment.End) {
@@ -281,163 +381,192 @@ fun NotesScreen(
             }
         }
     ) { paddingValues ->
-        Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            Box(modifier = Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                // NORMAL TOP BAR
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = selectedNotes.isEmpty(),
-                    enter = fadeIn(tween(300)),
-                    exit = fadeOut(tween(300))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        ExpressiveIconButton(
-                            icon = Icons.Default.Menu,
-                            contentDescription = "Menu",
-                            onClick = onMenuClick
-                        )
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            val fullHeight = this.constraints.maxHeight.toFloat()
+            Box(modifier = Modifier.fillMaxSize()
+                .onGloballyPositioned { containerPositionInWindow = it.positionInWindow() }
+                .pointerInput(displayedNotes, displayedFolders) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { offset ->
+                        isGestureActive = true
+                        val windowOffset = offset + containerPositionInWindow
+                        // Find starting index
+                        val noteFound = noteBounds.entries.find { it.value.contains(windowOffset) }
+                        val folderFound = folderBounds.entries.find { it.value.contains(windowOffset) }
                         
-                        OutlinedTextField(
-                            value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Search in $currentFolder...") },
-                            trailingIcon = { if (searchQuery.isNotEmpty()) { ExpressiveIconButton(icon = Icons.Default.Clear, contentDescription = "Clear search", onClick = { searchQuery = "" }, size = 32.dp, iconSize = 18.dp) } },
-                            shape = RoundedCornerShape(32.dp),
-                            colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .clickable { showProfileDialog = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (userPhotoUri != null) {
-                                AsyncImage(
-                                    model = userPhotoUri,
-                                    contentDescription = "Profile",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Icon(Icons.Default.Person, contentDescription = "Profile", tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                            }
-                        }
-                    }
-                }
-
-                // CONTEXTUAL SELECTION BAR
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = selectedNotes.isNotEmpty(),
-                    enter = fadeIn(tween(300)),
-                    exit = fadeOut(tween(300))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        ExpressiveIconButton(
-                            icon = Icons.Default.Close,
-                            contentDescription = "Clear Selection",
-                            onClick = onClearSelection,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Text(
-                            text = "${selectedNotes.size} selected",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(start = 8.dp).weight(1f)
-                        )
-                        
-                        if (currentFolder == "Trash") {
-                            ExpressiveIconButton(icon = Icons.Default.Restore, contentDescription = "Restore", onClick = onActionRestore, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                            ExpressiveIconButton(icon = Icons.Default.DeleteForever, contentDescription = "Delete Permanently", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                        } else {
-                            if (selectedNotes.size == 1) {
-                                ExpressiveIconButton(icon = Icons.Default.FileUpload, contentDescription = "Export .pxnote", onClick = { onExportPxNote(selectedNotes.first()) }, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                            }
-                            ExpressiveIconButton(icon = Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move", onClick = onActionMove, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                            ExpressiveIconButton(icon = Icons.Default.PictureAsPdf, contentDescription = "Merge PDF", onClick = onActionExport, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                            ExpressiveIconButton(icon = Icons.Default.Share, contentDescription = "Share", onClick = onActionShare, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                            ExpressiveIconButton(icon = Icons.Default.Delete, contentDescription = "Trash", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                }
-            }
-
-                if (displayedFolders.isEmpty() && displayedNotes.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = if (searchQuery.isNotBlank()) "No matching results found" else "Empty folder", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
-                }
-            } else {
-            AnimatedContent(
-                targetState = currentFolder to searchQuery,
-                transitionSpec = {
-                    val isSearchChange = targetState.second != initialState.second
-                    if (isSearchChange) {
-                        fadeIn(tween(300)) togetherWith fadeOut(tween(300))
-                    } else {
-                        (slideInHorizontally(animationSpec = tween(400)) { width -> width } + fadeIn()).togetherWith(
-                            slideOutHorizontally(animationSpec = tween(400)) { width -> -width / 2 } + fadeOut()
-                        )
-                    }
-                },
-                label = "GridTransition",
-                modifier = Modifier.fillMaxSize()
-            ) { (targetFolder, targetQuery) ->
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 220.dp), 
-                    modifier = Modifier.fillMaxSize(), 
-                    contentPadding = PaddingValues(16.dp), 
-                    horizontalArrangement = Arrangement.spacedBy(16.dp), 
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(displayedFolders, key = { it.path }) { folderItem ->
-                        var isVisible by remember(folderItem.path) { mutableStateOf(false) }
-                        LaunchedEffect(folderItem.path) { isVisible = true }
-                        
-                        AnimatedVisibility(
-                            visible = isVisible,
-                            enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.9f, animationSpec = tween(300))
-                        ) {
-                            FolderCard(
-                                folder = folderItem,
-                                onClick = { searchQuery = ""; onFolderSelected(folderItem.path) },
-                                onRenameClick = { newFolderName = folderItem.name; folderToRename = folderItem },
-                                onDeleteClick = { folderToDelete = folderItem }
-                            )
-                        }
-                    }
-                    items(displayedNotes, key = { it.note.id }) { noteWP ->
-                        var isVisible by remember(noteWP.note.id) { mutableStateOf(false) }
-                        LaunchedEffect(noteWP.note.id) { isVisible = true }
-
-                        AnimatedVisibility(
-                            visible = isVisible,
-                            enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.85f, animationSpec = tween(400))
-                        ) {
-                            NoteCard(
-                                noteWithPages = noteWP,
-                                isSelected = selectedNotes.any { it.note.id == noteWP.note.id },
-                                onClick = { 
-                                    haptic.click()
-                                    if (selectedNotes.isNotEmpty() || currentFolder == "Trash") onNoteLongClick(noteWP) else onNoteClick(noteWP) 
-                                },
-                                onLongClick = { 
+                        if (noteFound != null) {
+                            val noteWP = displayedNotes.find { it.note.id == noteFound.key }
+                            if (noteWP != null) {
+                                dragStartIndex = displayedFolders.size + displayedNotes.indexOf(noteWP)
+                                if (!selectedNotes.any { it.note.id == noteWP.note.id }) {
                                     haptic.selection()
-                                    onNoteLongClick(noteWP) 
+                                    onNoteLongClick(noteWP)
                                 }
-                            )
+                            }
+                        } else if (folderFound != null) {
+                            val folder = displayedFolders.find { it.path == folderFound.key }
+                            if (folder != null) {
+                                dragStartIndex = displayedFolders.indexOf(folder)
+                                if (!viewModel.selectedFolders.any { it.path == folder.path }) {
+                                    haptic.selection()
+                                    viewModel.toggleFolderSelection(folder)
+                                }
+                            }
+                        }
+                        
+                        initialSelectionNotes = selectedNotes.map { it.note.id }.toSet()
+                        initialSelectionFolders = viewModel.selectedFolders.map { it.path }.toSet()
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val currentPos = change.position
+                        val windowPos = currentPos + containerPositionInWindow
+                        
+                        val scrollThreshold = 150f
+                        dragScrollDirection = if (currentPos.y < scrollThreshold) {
+                            -15f * (1f - (currentPos.y / scrollThreshold))
+                        } else if (currentPos.y > fullHeight - scrollThreshold) {
+                            15f * (1f - ((fullHeight - currentPos.y) / scrollThreshold))
+                        } else {
+                            0f
+                        }
+
+                        val noteFound = noteBounds.entries.find { it.value.contains(windowPos) }
+                        val folderFound = folderBounds.entries.find { it.value.contains(windowPos) }
+                        
+                        val dragCurrentIndex = if (noteFound != null) {
+                            val noteWP = displayedNotes.find { it.note.id == noteFound.key }
+                            if (noteWP != null) displayedFolders.size + displayedNotes.indexOf(noteWP) else -1
+                        } else if (folderFound != null) {
+                            val folder = displayedFolders.find { it.path == folderFound.key }
+                            if (folder != null) displayedFolders.indexOf(folder) else -1
+                        } else -1
+
+                        if (dragStartIndex != -1 && dragCurrentIndex != -1) {
+                            val start = if (dragStartIndex < dragCurrentIndex) dragStartIndex else dragCurrentIndex
+                            val end = if (dragStartIndex < dragCurrentIndex) dragCurrentIndex else dragStartIndex
+                            
+                            displayedFolders.forEachIndexed { index, folder ->
+                                val inRange = index in start..end
+                                val isSelected = viewModel.selectedFolders.any { it.path == folder.path }
+                                if (inRange && !isSelected) {
+                                    haptic.tick()
+                                    viewModel.toggleFolderSelection(folder)
+                                } else if (!inRange && isSelected && !initialSelectionFolders.contains(folder.path)) {
+                                    haptic.tick()
+                                    viewModel.toggleFolderSelection(folder)
+                                }
+                            }
+                            displayedNotes.forEachIndexed { index, noteWP ->
+                                val globalIndex = displayedFolders.size + index
+                                val inRange = globalIndex in start..end
+                                val isSelected = selectedNotes.any { it.note.id == noteWP.note.id }
+                                if (inRange && !isSelected) {
+                                    haptic.tick()
+                                    onNoteLongClick(noteWP)
+                                } else if (!inRange && isSelected && !initialSelectionNotes.contains(noteWP.note.id)) {
+                                    haptic.tick()
+                                    onNoteLongClick(noteWP)
+                                }
+                            }
+                        }
+                    },
+                    onDragEnd = { 
+                        dragStartIndex = -1
+                        dragScrollDirection = 0f
+                        lastGestureTime = System.currentTimeMillis()
+                        isGestureActive = false
+                    },
+                    onDragCancel = { 
+                        dragStartIndex = -1
+                        dragScrollDirection = 0f
+                        lastGestureTime = System.currentTimeMillis()
+                        isGestureActive = false
+                    }
+                )
+            }) {
+                if (displayedFolders.isEmpty() && displayedNotes.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(text = if (searchQuery.isNotBlank()) "No matching results found" else "Empty folder", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.outline)
+                    }
+                } else {
+                    AnimatedContent(
+                        targetState = currentFolder to searchQuery,
+                        transitionSpec = {
+                            val isSearchChange = targetState.second != initialState.second
+                            if (isSearchChange) {
+                                fadeIn(tween(300)) togetherWith fadeOut(tween(300))
+                            } else {
+                                (slideInHorizontally(animationSpec = tween(400)) { width -> width } + fadeIn()).togetherWith(
+                                    slideOutHorizontally(animationSpec = tween(400)) { width -> -width / 2 } + fadeOut()
+                                )
+                            }
+                        },
+                        label = "GridTransition",
+                        modifier = Modifier.fillMaxSize()
+                    ) { (targetFolder, targetQuery) ->
+                        LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(minSize = 220.dp), 
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp), 
+                        horizontalArrangement = Arrangement.spacedBy(16.dp), 
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                            items(displayedFolders, key = { it.path }) { folderItem ->
+                                FolderCard(
+                                    folder = folderItem,
+                                    isSelected = viewModel.selectedFolders.any { it.path == folderItem.path },
+                                    onClick = { 
+                                        if (viewModel.selectedFolders.isNotEmpty() || selectedNotes.isNotEmpty()) {
+                                            haptic.click()
+                                            viewModel.toggleFolderSelection(folderItem)
+                                        } else {
+                                            searchQuery = ""
+                                            onFolderSelected(folderItem.path)
+                                        }
+                                    },
+                                    onLongClick = {},
+                                    onPositioned = { rect -> folderBounds[folderItem.path] = rect },
+                                    enabled = !isGestureActive && !isGuardActive
+                                )
+                            }
+                            items(displayedNotes, key = { it.note.id }) { noteWP ->
+                                val isSelected = selectedNotes.any { it.note.id == noteWP.note.id }
+                                NoteCard(
+                                    noteWithPages = noteWP,
+                                    isSelected = isSelected,
+                                    onClick = { 
+                                        haptic.click()
+                                        if (selectedNotes.isNotEmpty() || viewModel.selectedFolders.isNotEmpty() || currentFolder == "Trash") onNoteLongClick(noteWP) else onNoteClick(noteWP) 
+                                    },
+                                    onLongClick = {},
+                                    onPositioned = { rect -> noteBounds[noteWP.note.id] = rect },
+                                    enabled = !isGestureActive && !isGuardActive
+                                )
+                            }
                         }
                     }
                 }
-            }
             }
         }
+    }
+
+    if (showProfileDialog) {
+        ProfileDialog(
+            userEmail = userEmail,
+            userName = userName,
+            userPhotoUri = userPhotoUri,
+            isSyncing = viewModel.isSyncing,
+            onDismiss = { showProfileDialog = false },
+            onSignOut = { onSignOutClick(); showProfileDialog = false },
+            onSignIn = { onSignInClick(); showProfileDialog = false },
+            onBackup = { viewModel.backupToCloud(context) },
+            onRestore = { viewModel.restoreFromCloudManual(context) },
+            onPurge = { viewModel.purgeCloudData(context) },
+            onLocalBackup = onLocalBackup,
+            onLocalRestore = onLocalRestore
+        )
     }
 }
 

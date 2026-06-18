@@ -132,6 +132,7 @@ class MainActivity : ComponentActivity() {
                 val backEnabled = viewModel.currentScreen != 0 || 
                                   viewModel.currentFolderFilter != "All Notes" || 
                                   viewModel.selectedNotes.isNotEmpty() || 
+                                  viewModel.selectedFolders.isNotEmpty() ||
                                   drawerState.isOpen
 
                 PredictiveBackHandler(enabled = backEnabled) { progressFlow ->
@@ -139,7 +140,7 @@ class MainActivity : ComponentActivity() {
                         try { progressFlow.collect { }; coroutineScope.launch { drawerState.close() } } catch (e: CancellationException) { }
                         return@PredictiveBackHandler
                     }
-                    if (viewModel.selectedNotes.isNotEmpty()) {
+                    if (viewModel.selectedNotes.isNotEmpty() || viewModel.selectedFolders.isNotEmpty()) {
                         try { progressFlow.collect { }; viewModel.clearSelection() } catch (e: CancellationException) { }
                         return@PredictiveBackHandler
                     }
@@ -208,7 +209,16 @@ class MainActivity : ComponentActivity() {
                                     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
                                         OutlinedTextField(value = selectedFolder, onValueChange = {}, readOnly = true, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }, modifier = Modifier.menuAnchor())
                                         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                            availableFolders.forEach { folder -> DropdownMenuItem(text = { Text(folder) }, onClick = { selectedFolder = folder; expanded = false }) }
+                                            availableFolders.forEach { folder -> 
+                                                DropdownMenuItem(
+                                                    text = { Text(folder) }, 
+                                                    onClick = { 
+                                                        viewModel.clickHaptic()
+                                                        selectedFolder = folder
+                                                        expanded = false 
+                                                    }
+                                                ) 
+                                            }
                                         }
                                     }
                                 }

@@ -78,6 +78,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     private val redoStack = mutableListOf<EditorAction>()
 
     val selectedNotes = mutableStateListOf<NoteWithPages>()
+    val selectedFolders = mutableStateListOf<FolderEntity>()
     var showDeleteDialog by mutableStateOf(false)
     var showMoveDialog by mutableStateOf(false)
     var showShareDialog by mutableStateOf(false)
@@ -619,15 +620,29 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                 if (result != null) {
                     val pdfPath = result.first
                     val pageCount = result.second
-                    commitSelection()
-                    if (isNoteBlank()) {
-                        currentTitle = pdfName; currentPages.clear()
-                        for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = i, backgroundUri = "$pdfPath?pdfPage=$i"))
+                    
+                    if (currentScreen == 0) {
+                        // Creating a fresh note from main screen
+                        commitSelection()
+                        selectedNoteWithPages = null
+                        currentTitle = pdfName
+                        currentPages.clear()
+                        for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = 0, pageNumber = i, backgroundUri = "$pdfPath?pdfPage=$i"))
                         activePageIndex = 0
+                        isCurrentNoteInfinite = false
+                        currentScreen = 1
                     } else {
-                        val startIdx = currentPages.size
-                        for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = startIdx + i, backgroundUri = "$pdfPath?pdfPage=$i"))
-                        activePageIndex = currentPages.lastIndex
+                        // Importing into existing note/editor session
+                        commitSelection()
+                        if (isNoteBlank()) {
+                            currentTitle = pdfName; currentPages.clear()
+                            for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = i, backgroundUri = "$pdfPath?pdfPage=$i"))
+                            activePageIndex = 0
+                        } else {
+                            val startIdx = currentPages.size
+                            for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = startIdx + i, backgroundUri = "$pdfPath?pdfPage=$i"))
+                            activePageIndex = currentPages.lastIndex
+                        }
                     }
                 }
                 isImportingPdf = false
@@ -638,6 +653,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     fun moveToTrash() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             selectedNotes.forEach { dao.updateNote(it.note.copy(inTrash = true, updatedAt = System.currentTimeMillis())) }
+            selectedFolders.forEach { dao.trashNotesInFolderCascade(it.path) }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { clearSelection() }
         }
     }
@@ -655,6 +671,9 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                 noteWP.pages.forEach { page -> page.backgroundUri?.let { uri -> if (uri.contains("?pdfPage=")) { val path = uri.split("?pdfPage=")[0]; val file = java.io.File(path); if (file.exists()) file.delete() } } }
                 dao.deleteNote(noteWP.note)
                 dao.deletePagesByNoteId(noteWP.note.id)
+            }
+            selectedFolders.forEach { folder ->
+                dao.deleteFolderCascade(folder.path)
             }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { clearSelection() }
         }
@@ -680,8 +699,33 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         }
     }
 
-    fun toggleSelection(note: NoteWithPages) { if (selectedNotes.any { it.note.id == note.note.id }) selectedNotes.removeAll { it.note.id == note.note.id } else selectedNotes.add(note) }
-    fun clearSelection() { selectedNotes.clear() }
+    fun toggleSelection(note: NoteWithPages) { 
+        if (selectedNotes.any { it.note.id == note.note.id }) selectedNotes.removeAll { it.note.id == note.note.id } 
+        else selectedNotes.add(note) 
+    }
+
+    fun toggleFolderSelection(folder: FolderEntity) {
+        if (selectedFolders.any { it.path == folder.path }) selectedFolders.removeAll { it.path == folder.path }
+        else selectedFolders.add(folder)
+    }
+
+    fun clearSelection() { 
+        selectedNotes.clear() 
+        selectedFolders.clear()
+    }
+
+    fun moveNoteToFolder(noteId: Int, folderPath: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val noteWP = notes.value.find { it.note.id == noteId }
+            if (noteWP != null) {
+                dao.updateNote(noteWP.note.copy(folder = folderPath, updatedAt = System.currentTimeMillis()))
+            }
+        }
+    }
+
+    fun clickHaptic() {
+        com.midknight.pixelnotes.domain.HapticManager(context).click()
+    }
     fun moveSelectedNotes(newFolder: String) { viewModelScope.launch { selectedNotes.forEach { dao.updateNote(it.note.copy(folder = newFolder)) }; clearSelection() } }
     fun createFolder(name: String, parentPath: String?) { val path = if (parentPath == null) name else "$parentPath/$name"; viewModelScope.launch { dao.insertFolder(FolderEntity(path = path, name = name, parentPath = parentPath)) } }
     fun renameFolder(oldPath: String, newName: String) { val parentPath = oldPath.substringBeforeLast('/', ""); val newPath = if (parentPath.isEmpty()) newName else "$parentPath/$newName"; viewModelScope.launch { dao.renameFoldersCascade(oldPath, newPath, newName); dao.renameNotesFolderCascade(oldPath, newPath); if (currentFolderFilter == oldPath || currentFolderFilter.startsWith("$oldPath/")) currentFolderFilter = newPath + currentFolderFilter.removePrefix(oldPath) } }

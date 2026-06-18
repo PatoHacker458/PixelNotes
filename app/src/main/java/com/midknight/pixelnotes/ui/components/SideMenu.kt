@@ -87,6 +87,10 @@ fun SideMenu(
     var showRenameDialog by remember { mutableStateOf(false) }
     var folderToRenamePath by remember { mutableStateOf<String?>(null) }
     var folderRenameValue by remember { mutableStateOf("") }
+    
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var folderToDeletePath by remember { mutableStateOf<String?>(null) }
+    var folderToDeleteName by remember { mutableStateOf("") }
 
     if (showDialog) {
         AlertDialog(
@@ -95,12 +99,20 @@ fun SideMenu(
             text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, label = { Text("Folder Name") }) },
             confirmButton = {
                 TextButton(onClick = {
-                    if (newFolderName.isNotBlank()) onCreateFolder(newFolderName, targetParentPath)
+                    if (newFolderName.isNotBlank()) {
+                        haptic.click()
+                        onCreateFolder(newFolderName, targetParentPath)
+                    }
                     showDialog = false
                     newFolderName = ""
                 }) { Text("Create") }
             },
-            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }
+            dismissButton = { 
+                TextButton(onClick = { 
+                    haptic.click()
+                    showDialog = false 
+                }) { Text("Cancel") } 
+            }
         )
     }
 
@@ -111,11 +123,43 @@ fun SideMenu(
             text = { OutlinedTextField(value = folderRenameValue, onValueChange = { folderRenameValue = it }, label = { Text("New Name") }) },
             confirmButton = {
                 TextButton(onClick = {
-                    if (folderRenameValue.isNotBlank() && folderToRenamePath != null) onRenameFolder(folderToRenamePath!!, folderRenameValue)
+                    if (folderRenameValue.isNotBlank() && folderToRenamePath != null) {
+                        haptic.click()
+                        onRenameFolder(folderToRenamePath!!, folderRenameValue)
+                    }
                     showRenameDialog = false
                 }) { Text("Save") }
             },
-            dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") } }
+            dismissButton = { 
+                TextButton(onClick = { 
+                    haptic.click()
+                    showRenameDialog = false 
+                }) { Text("Cancel") } 
+            }
+        )
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("Delete Folder") },
+            text = { Text("Delete '$folderToDeleteName' and all its contents?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (folderToDeletePath != null) {
+                        haptic.click()
+                        onDeleteFolder(folderToDeletePath!!)
+                    }
+                    showDeleteConfirmDialog = false
+                    folderToDeletePath = null
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { 
+                TextButton(onClick = { 
+                    haptic.click()
+                    showDeleteConfirmDialog = false 
+                }) { Text("Cancel") } 
+            }
         )
     }
 
@@ -151,7 +195,12 @@ fun SideMenu(
                     node = node, currentFolder = currentFolder, depth = 0, onFolderSelected = onFolderSelected,
                     onAddSubfolder = { path -> targetParentPath = path; showDialog = true },
                     onRename = { path, name -> folderToRenamePath = path; folderRenameValue = name; showRenameDialog = true },
-                    onDelete = onDeleteFolder,
+                    onDelete = { path -> 
+                        val folder = folders.find { it.path == path }
+                        folderToDeletePath = path
+                        folderToDeleteName = folder?.name ?: ""
+                        showDeleteConfirmDialog = true
+                    },
                     haptic = haptic
                 )
             }
@@ -220,8 +269,24 @@ private fun SideMenuItem(
             }
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; onRename() }, leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) })
-            DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; onDelete() }, leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) })
+            DropdownMenuItem(
+                text = { Text("Rename") }, 
+                onClick = { 
+                    haptic.click()
+                    showMenu = false; 
+                    onRename() 
+                }, 
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
+            )
+            DropdownMenuItem(
+                text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, 
+                onClick = { 
+                    haptic.click()
+                    showMenu = false; 
+                    onDelete() 
+                }, 
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) }
+            )
         }
     }
 }

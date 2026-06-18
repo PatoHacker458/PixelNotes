@@ -1,9 +1,8 @@
 package com.midknight.pixelnotes.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,27 +23,31 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.remember
 import com.midknight.pixelnotes.data.NoteWithPages
 import com.midknight.pixelnotes.domain.HapticManager
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NoteCard(
     noteWithPages: NoteWithPages,
     isSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    modifier: Modifier = Modifier
+    onPositioned: (Rect) -> Unit = {},
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     val context = LocalContext.current
     val haptic = remember { HapticManager(context) }
@@ -55,20 +58,20 @@ fun NoteCard(
         modifier = modifier
             .fillMaxWidth()
             .scale(scale)
+            .onGloballyPositioned { layoutCoordinates ->
+                onPositioned(layoutCoordinates.boundsInWindow())
+            }
             .border(
                 width = if (isSelected) 3.dp else 0.dp,
                 color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
                 shape = RoundedCornerShape(32.dp)
             )
             .clip(RoundedCornerShape(32.dp))
-            .combinedClickable(
+            .clickable(
+                enabled = enabled,
                 onClick = {
                     haptic.click()
                     onClick()
-                },
-                onLongClick = {
-                    haptic.selection()
-                    onLongClick()
                 }
             ),
         shape = RoundedCornerShape(32.dp),
