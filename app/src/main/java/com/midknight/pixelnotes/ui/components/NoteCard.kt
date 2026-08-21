@@ -90,8 +90,9 @@ fun NoteCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                val pageCount = if (note.pdfPath != null && note.pdfPageCount > 0) note.pdfPageCount else noteWithPages.pages.size
                 Text(
-                    text = "${noteWithPages.pages.size} page(s)",
+                    text = "$pageCount page(s)",
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,

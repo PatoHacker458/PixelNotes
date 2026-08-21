@@ -181,6 +181,7 @@ fun SideMenu(
             ExpressiveIconButton(
                 icon = Icons.Default.CreateNewFolder,
                 contentDescription = "Add Root Folder",
+                tooltip = "New Folder",
                 onClick = { targetParentPath = null; showDialog = true },
                 contentColor = MaterialTheme.colorScheme.primary
             )
@@ -261,6 +262,7 @@ private fun SideMenuItem(
                 ExpressiveIconButton(
                     icon = Icons.Default.Add,
                     contentDescription = "Add Subfolder",
+                    tooltip = "Add Subfolder",
                     onClick = onAddSubfolder,
                     size = 32.dp,
                     iconSize = 16.dp,

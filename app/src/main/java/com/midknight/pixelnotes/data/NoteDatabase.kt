@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 14, exportSchema = false)
+@Database(entities = [Note::class, PageEntity::class, FolderEntity::class, CustomFont::class], version = 15, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class NoteDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
@@ -27,11 +27,17 @@ abstract class NoteDatabase : RoomDatabase() {
         private val MIGRATION_11_12 = object : Migration(11, 12) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `notes` ADD COLUMN `isInfinite` INTEGER NOT NULL DEFAULT 0") } }
         private val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `pages` ADD COLUMN `audioData` TEXT NOT NULL DEFAULT '[]'") } }
         private val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(database: SupportSQLiteDatabase) { database.execSQL("ALTER TABLE `notes` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0") } }
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `notes` ADD COLUMN `pdfPath` TEXT")
+                database.execSQL("ALTER TABLE `notes` ADD COLUMN `pdfPageCount` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         fun getDatabase(context: Context): NoteDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(context.applicationContext, NoteDatabase::class.java, "pixel_notes_database")
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

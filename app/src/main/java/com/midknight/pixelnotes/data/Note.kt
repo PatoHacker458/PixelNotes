@@ -19,7 +19,9 @@ data class Note(
     val folder: String = "General",
     val inTrash: Boolean = false,
     val isInfinite: Boolean = false,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val pdfPath: String? = null,
+    val pdfPageCount: Int = 0
 )
 
 @Entity(tableName = "pages")

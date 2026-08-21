@@ -14,12 +14,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +47,9 @@ import androidx.graphics.shapes.RoundedPolygon
 import androidx.graphics.shapes.circle
 import androidx.graphics.shapes.star
 import androidx.graphics.shapes.toPath
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
 import com.midknight.pixelnotes.domain.HapticManager
 import androidx.compose.ui.platform.LocalContext
 
@@ -67,6 +76,7 @@ class MorphPolygonShape(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExpressiveIconButton(
     icon: ImageVector,
@@ -76,7 +86,8 @@ fun ExpressiveIconButton(
     containerColor: Color = Color.Transparent,
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     size: Dp = 48.dp,
-    iconSize: Dp = 24.dp
+    iconSize: Dp = 24.dp,
+    tooltip: String? = null
 ) {
     val context = LocalContext.current
     val shapeA = remember { RoundedPolygon.circle() }
@@ -86,6 +97,8 @@ fun ExpressiveIconButton(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val haptic = remember { HapticManager(context) }
+    val tooltipState = rememberTooltipState()
+    val scope = rememberCoroutineScope()
 
     val progress by animateFloatAsState(
         targetValue = if (isPressed) 1f else 0f,
@@ -93,33 +106,61 @@ fun ExpressiveIconButton(
         label = "iconMorph"
     )
 
-    Box(
-        modifier = modifier
-            .size(size)
-            .clip(MorphPolygonShape(morph, progress))
-            .background(containerColor)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = { 
-                haptic.click()
-                onClick() 
-            }),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = contentColor,
-            modifier = Modifier.size(iconSize)
-        )
+    val content = @Composable {
+        Box(
+            modifier = modifier
+                .size(size)
+                .clip(MorphPolygonShape(morph, progress))
+                .background(containerColor)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == PointerEventType.Enter) {
+                                scope.launch { tooltipState.show() }
+                            } else if (event.type == PointerEventType.Exit) {
+                                tooltipState.dismiss()
+                            }
+                        }
+                    }
+                }
+                .clickable(interactionSource = interactionSource, indication = null, onClick = { 
+                    haptic.click()
+                    onClick() 
+                }),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = contentColor,
+                modifier = Modifier.size(iconSize)
+            )
+        }
+    }
+
+    if (tooltip != null) {
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text(tooltip) } },
+            state = tooltipState
+        ) {
+            content()
+        }
+    } else {
+        content()
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExpressiveFAB(
     icon: ImageVector,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
+    contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    tooltip: String? = null
 ) {
     val context = LocalContext.current
     val shapeA = remember { RoundedPolygon.circle() }
@@ -129,6 +170,8 @@ fun ExpressiveFAB(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val haptic = remember { HapticManager(context) }
+    val tooltipState = rememberTooltipState()
+    val scope = rememberCoroutineScope()
 
     val progress by animateFloatAsState(
         targetValue = if (isPressed) 1f else 0f,
@@ -136,23 +179,49 @@ fun ExpressiveFAB(
         label = "fabMorph"
     )
 
-    Box(
-        modifier = modifier
-            .size(56.dp)
-            .clip(MorphPolygonShape(morph, progress))
-            .background(containerColor)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = {
-                haptic.heavyClick()
-                onClick()
-            }),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = contentColor,
-            modifier = Modifier.size(28.dp)
-        )
+    val content = @Composable {
+        Box(
+            modifier = modifier
+                .size(56.dp)
+                .clip(MorphPolygonShape(morph, progress))
+                .background(containerColor)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == PointerEventType.Enter) {
+                                scope.launch { tooltipState.show() }
+                            } else if (event.type == PointerEventType.Exit) {
+                                tooltipState.dismiss()
+                            }
+                        }
+                    }
+                }
+                .clickable(interactionSource = interactionSource, indication = null, onClick = {
+                    haptic.heavyClick()
+                    onClick()
+                }),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(28.dp)
+            )
+        }
+    }
+
+    if (tooltip != null) {
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text(tooltip) } },
+            state = tooltipState
+        ) {
+            content()
+        }
+    } else {
+        content()
     }
 }
 

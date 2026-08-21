@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -30,7 +31,14 @@ import java.util.Locale
 
 enum class DrawingTool { PEN, HIGHLIGHTER, ERASER, TEXT, SELECTION }
 
-data class EditorAction(val pageIndex: Int, val stroke: StrokeData?, val text: TextData?, val image: com.midknight.pixelnotes.domain.ImageData?, val audio: com.midknight.pixelnotes.domain.AudioData? = null, val isAdd: Boolean)
+data class EditorAction(
+    val pageIndex: Int, 
+    val strokes: List<StrokeData> = emptyList(), 
+    val texts: List<TextData> = emptyList(), 
+    val images: List<com.midknight.pixelnotes.domain.ImageData> = emptyList(), 
+    val audios: List<com.midknight.pixelnotes.domain.AudioData> = emptyList(), 
+    val isAdd: Boolean
+)
 class NotesViewModel(private val dao: NoteDao, private val context: android.content.Context) : ViewModel() {
     val notes = dao.getAllNotesWithPages().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val folders = dao.getAllFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -50,8 +58,9 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     var currentColor by mutableStateOf(Color.Black)
     var currentStrokeWidth by mutableFloatStateOf(8f)
     var currentEraserWidth by mutableFloatStateOf(20f)
-    var eraserType by mutableIntStateOf(0)
+    var eraserType by mutableIntStateOf(1)
     var fingerDrawingEnabled by mutableStateOf(true)
+    val recentColors = mutableStateListOf<Color>()
 
     var currentTextSize by mutableFloatStateOf(40f)
     var currentFontName by mutableStateOf("Default")
@@ -83,7 +92,9 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     var showMoveDialog by mutableStateOf(false)
     var showShareDialog by mutableStateOf(false)
     var showEmptyTrashDialog by mutableStateOf(false)
+    var showFabMenu by mutableStateOf(false)
 
+    var isSaving by mutableStateOf(false)
     var isImportingPdf by mutableStateOf(false)
     var pendingCameraUri by mutableStateOf<android.net.Uri?>(null)
     var isRecording by mutableStateOf(false)
@@ -110,6 +121,33 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         userEmail = prefs?.getString("user_email", null)
         userName = prefs?.getString("user_name", null)
         userPhotoUri = prefs?.getString("user_photo", null)
+
+        val isTablet = context.resources.configuration.smallestScreenWidthDp >= 600
+        fingerDrawingEnabled = !isTablet
+
+        val savedEraserWidth = prefs?.getFloat("eraser_width", 20f) ?: 20f
+        currentEraserWidth = savedEraserWidth
+
+        val savedColors = prefs?.getString("recent_colors", null)
+        if (!savedColors.isNullOrEmpty()) {
+            savedColors.split(",").forEach { 
+                try { recentColors.add(Color(it.toInt())) } catch(e: Exception) {}
+            }
+        }
+        if (recentColors.isEmpty()) {
+            recentColors.addAll(listOf(Color.Black, Color.Red, Color.Blue))
+        }
+    }
+
+    fun addToRecentColors(color: Color) {
+        val list = recentColors.toMutableList()
+        list.remove(color)
+        list.add(0, color)
+        if (list.size > 3) list.removeAt(3)
+        recentColors.clear()
+        recentColors.addAll(list)
+        prefs?.edit()?.putString("recent_colors", recentColors.joinToString(",") { it.toArgb().toString() })?.apply()
+        currentColor = color
     }
 
     fun createImageUri(context: android.content.Context): android.net.Uri? {
@@ -258,9 +296,15 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         if ((selectedStrokes.isNotEmpty() || selectedTexts.isNotEmpty() || selectedImages.isNotEmpty()) && selectionPageIndex != -1) {
             val page = currentPages[selectionPageIndex]
             currentPages[selectionPageIndex] = page.copy(drawingData = page.drawingData + selectedStrokes, textData = page.textData + selectedTexts, imageData = page.imageData + selectedImages)
-            selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, null, null, true)) }
-            selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, null, null, true)) }
-            selectedImages.forEach { undoStack.add(EditorAction(selectionPageIndex, null, null, it, null, true)) }
+            
+            undoStack.add(EditorAction(
+                pageIndex = selectionPageIndex,
+                strokes = selectedStrokes.toList(),
+                texts = selectedTexts.toList(),
+                images = selectedImages.toList(),
+                isAdd = true
+            ))
+            
             redoStack.clear(); selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1
         }
     }
@@ -273,18 +317,28 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                 textData = targetPage.textData + selectedTexts,
                 imageData = targetPage.imageData + selectedImages
             )
-            selectedStrokes.forEach { undoStack.add(EditorAction(targetPageIndex, it, null, null, null, true)) }
-            selectedTexts.forEach { undoStack.add(EditorAction(targetPageIndex, null, it, null, null, true)) }
-            selectedImages.forEach { undoStack.add(EditorAction(targetPageIndex, null, null, it, null, true)) }
+            
+            undoStack.add(EditorAction(
+                pageIndex = targetPageIndex,
+                strokes = selectedStrokes.toList(),
+                texts = selectedTexts.toList(),
+                images = selectedImages.toList(),
+                isAdd = true
+            ))
+            
             redoStack.clear(); selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1
         }
     }
 
     fun deleteSelection() {
         if (selectionPageIndex != -1) {
-            selectedStrokes.forEach { undoStack.add(EditorAction(selectionPageIndex, it, null, null, null, false)) }
-            selectedTexts.forEach { undoStack.add(EditorAction(selectionPageIndex, null, it, null, null, false)) }
-            selectedImages.forEach { undoStack.add(EditorAction(selectionPageIndex, null, null, it, null, false)) }
+            undoStack.add(EditorAction(
+                pageIndex = selectionPageIndex,
+                strokes = selectedStrokes.toList(),
+                texts = selectedTexts.toList(),
+                images = selectedImages.toList(),
+                isAdd = false
+            ))
             redoStack.clear()
         }
         selectedStrokes.clear(); selectedTexts.clear(); selectedImages.clear(); selectionPageIndex = -1
@@ -355,33 +409,68 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         pasteSelection(selectionPageIndex)
     }
 
-    fun addNewPage() { commitSelection(); currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = currentPages.size)); activePageIndex = currentPages.lastIndex }
+    fun addNewPage() { 
+        commitSelection()
+        val currentPage = currentPages.getOrNull(activePageIndex)
+        val newPage = PageEntity(
+            noteId = selectedNoteWithPages?.note?.id ?: 0, 
+            pageNumber = currentPages.size,
+            paperStyle = currentPage?.paperStyle ?: 0,
+            canvasColor = currentPage?.canvasColor ?: -1
+        )
+        currentPages.add(newPage)
+        activePageIndex = currentPages.lastIndex 
+    }
     fun deletePageAt(index: Int) { commitSelection(); if (currentPages.size > 1) { currentPages.removeAt(index); if (activePageIndex >= currentPages.size) activePageIndex = currentPages.size - 1 } }
     fun movePage(fromIndex: Int, toIndex: Int) { commitSelection(); if (fromIndex == toIndex) return; val page = currentPages.removeAt(fromIndex); currentPages.add(toIndex, page); if (activePageIndex == fromIndex) activePageIndex = toIndex else if (activePageIndex in minOf(fromIndex, toIndex)..maxOf(fromIndex, toIndex)) { if (fromIndex < toIndex) activePageIndex-- else activePageIndex++ } }
     fun updateActivePageBackground(uri: String?) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(backgroundUri = uri) }
     fun updateActivePagePaperStyle(style: Int) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(paperStyle = style) }
     fun updateActivePageCanvasColor(color: Int) { if(currentPages.isNotEmpty()) currentPages[activePageIndex] = currentPages[activePageIndex].copy(canvasColor = color) }
 
-    fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke); undoStack.add(EditorAction(pageIndex, stroke, null, null, null, true)); redoStack.clear(); activePageIndex = pageIndex }
-    fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke }); undoStack.add(EditorAction(pageIndex, stroke, null, null, null, false)); redoStack.clear(); activePageIndex = pageIndex }
+    fun updateEraserWidth(width: Float) {
+        currentEraserWidth = width
+        prefs?.edit()?.putFloat("eraser_width", width)?.apply()
+    }
+
+    fun addStrokeToPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData + stroke); undoStack.add(EditorAction(pageIndex, strokes = listOf(stroke), isAdd = true)); redoStack.clear(); activePageIndex = pageIndex }
+    fun removeStrokeFromPage(pageIndex: Int, stroke: StrokeData) { val page = currentPages[pageIndex]; currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== stroke }); undoStack.add(EditorAction(pageIndex, strokes = listOf(stroke), isAdd = false)); redoStack.clear(); activePageIndex = pageIndex }
+    fun removeStrokesFromPage(pageIndex: Int, strokesToRemove: List<StrokeData>) {
+        if (pageIndex !in currentPages.indices || strokesToRemove.isEmpty()) return
+        val page = currentPages[pageIndex]
+        currentPages[pageIndex] = page.copy(drawingData = page.drawingData.filter { s -> strokesToRemove.none { it === s } })
+        undoStack.add(EditorAction(pageIndex, strokes = strokesToRemove, isAdd = false))
+        redoStack.clear()
+        activePageIndex = pageIndex
+    }
     fun undo() {
         commitSelection()
         val action = undoStack.removeLastOrNull() ?: return
         redoStack.add(action)
         val page = currentPages[action.pageIndex]
-        if (action.stroke != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
-            else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
-        } else if (action.text != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id })
-            else currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text)
-        } else if (action.image != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id })
-            else currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image)
-        } else if (action.audio != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(audioData = page.audioData.filter { it.id != action.audio.id })
-            else currentPages[action.pageIndex] = page.copy(audioData = page.audioData + action.audio)
+        
+        var newDrawingData = page.drawingData
+        var newTextData = page.textData
+        var newImageData = page.imageData
+        var newAudioData = page.audioData
+
+        if (action.isAdd) {
+            newDrawingData = newDrawingData.filter { s -> action.strokes.none { it === s } }
+            newTextData = newTextData.filter { t -> action.texts.none { it.id == t.id } }
+            newImageData = newImageData.filter { i -> action.images.none { it.id == i.id } }
+            newAudioData = newAudioData.filter { a -> action.audios.none { it.id == a.id } }
+        } else {
+            newDrawingData = newDrawingData + action.strokes
+            newTextData = newTextData + action.texts
+            newImageData = newImageData + action.images
+            newAudioData = newAudioData + action.audios
         }
+
+        currentPages[action.pageIndex] = page.copy(
+            drawingData = newDrawingData,
+            textData = newTextData,
+            imageData = newImageData,
+            audioData = newAudioData
+        )
         activePageIndex = action.pageIndex
     }
 
@@ -390,19 +479,30 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         val action = redoStack.removeLastOrNull() ?: return
         undoStack.add(action)
         val page = currentPages[action.pageIndex]
-        if (action.stroke != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData + action.stroke)
-            else currentPages[action.pageIndex] = page.copy(drawingData = page.drawingData.filter { it !== action.stroke })
-        } else if (action.text != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(textData = page.textData + action.text)
-            else currentPages[action.pageIndex] = page.copy(textData = page.textData.filter { it.id != action.text.id })
-        } else if (action.image != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(imageData = page.imageData + action.image)
-            else currentPages[action.pageIndex] = page.copy(imageData = page.imageData.filter { it.id != action.image.id })
-        } else if (action.audio != null) {
-            if (action.isAdd) currentPages[action.pageIndex] = page.copy(audioData = page.audioData + action.audio)
-            else currentPages[action.pageIndex] = page.copy(audioData = page.audioData.filter { it.id != action.audio.id })
+
+        var newDrawingData = page.drawingData
+        var newTextData = page.textData
+        var newImageData = page.imageData
+        var newAudioData = page.audioData
+
+        if (action.isAdd) {
+            newDrawingData = newDrawingData + action.strokes
+            newTextData = newTextData + action.texts
+            newImageData = newImageData + action.images
+            newAudioData = newAudioData + action.audios
+        } else {
+            newDrawingData = newDrawingData.filter { s -> action.strokes.none { it === s } }
+            newTextData = newTextData.filter { t -> action.texts.none { it.id == t.id } }
+            newImageData = newImageData.filter { i -> action.images.none { it.id == i.id } }
+            newAudioData = newAudioData.filter { a -> action.audios.none { it.id == a.id } }
         }
+
+        currentPages[action.pageIndex] = page.copy(
+            drawingData = newDrawingData,
+            textData = newTextData,
+            imageData = newImageData,
+            audioData = newAudioData
+        )
         activePageIndex = action.pageIndex
     }
     fun isNoteBlank(): Boolean { if (currentTitle != "New Note" || currentPages.size > 1) return false; val p = currentPages.firstOrNull() ?: return true; return p.drawingData.isEmpty() && p.textData.isEmpty() && p.imageData.isEmpty() && p.backgroundUri == null && p.paperStyle == 0 && p.canvasColor == -1 }
@@ -444,7 +544,38 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         cameraResetTrigger++
         cameraPan = androidx.compose.ui.geometry.Offset.Zero
         cameraZoom = 1f
-        if (noteWP != null && noteWP.pages.isNotEmpty()) { currentTitle = noteWP.note.title; currentPages.addAll(noteWP.pages); activePageIndex = 0 } else { currentTitle = "New Note"; currentPages.add(PageEntity(noteId = 0, pageNumber = 0)); activePageIndex = 0 }
+        
+        if (noteWP != null) {
+            currentTitle = noteWP.note.title
+            
+            if (noteWP.note.pdfPath != null && noteWP.note.pdfPageCount > 0) {
+                // VIRTUAL PAGINATION: Build a full list of 3000 pages in memory instantly
+                val pdfPath = noteWP.note.pdfPath
+                val count = noteWP.note.pdfPageCount
+                val existingPages = noteWP.pages.associateBy { it.pageNumber }
+                
+                // Find the maximum page number to handle appended pages
+                val maxPageNum = maxOf(count - 1, noteWP.pages.maxOfOrNull { it.pageNumber } ?: 0)
+                
+                val fullPages = (0..maxPageNum).map { i ->
+                    existingPages[i] ?: PageEntity(
+                        noteId = noteWP.note.id,
+                        pageNumber = i,
+                        backgroundUri = if (i < count) "$pdfPath?pdfPage=$i" else null
+                    )
+                }
+                currentPages.addAll(fullPages)
+            } else if (noteWP.pages.isNotEmpty()) {
+                currentPages.addAll(noteWP.pages)
+            } else {
+                currentPages.add(PageEntity(noteId = noteWP.note.id, pageNumber = 0))
+            }
+            activePageIndex = 0
+        } else {
+            currentTitle = "New Note"
+            currentPages.add(PageEntity(noteId = 0, pageNumber = 0))
+            activePageIndex = 0
+        }
         currentScreen = 1
     }
 
@@ -475,7 +606,12 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
 
     fun saveCurrentNote(date: String) {
         viewModelScope.launch {
-            saveCurrentNoteToDb(date)
+            isSaving = true
+            try {
+                saveCurrentNoteToDb(date)
+            } finally {
+                isSaving = false
+            }
         }
     }
 
@@ -494,7 +630,8 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
             date = date,
             folder = folderOverride ?: (selectedNoteWithPages?.note?.folder ?: if (currentFolderFilter == "All Notes" || currentFolderFilter == "Trash") "General" else currentFolderFilter),
             isInfinite = isInfiniteOverride ?: isCurrentNoteInfinite,
-            updatedAt = timestamp
+            updatedAt = timestamp,
+            pdfPageCount = if (noteOverride == null && selectedNoteWithPages?.note?.pdfPath != null) currentPages.size else (noteOverride?.pdfPageCount ?: (selectedNoteWithPages?.note?.pdfPageCount ?: 0))
         ) ?: Note(
             title = titleOverride ?: currentTitle,
             content = "",
@@ -519,9 +656,26 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                 dao.updateNote(noteToSave)
                 noteToSave.id
             }
-            dao.deletePagesByNoteId(noteId)
-            val pagesToInsert = pagesSnapshot.mapIndexed { index, page -> page.copy(pageId = 0, noteId = noteId, pageNumber = index) }
-            pagesToInsert.chunked(100).forEach { chunk -> dao.insertPages(chunk) }
+            
+            // VIRTUAL PAGINATION: Only save pages that have content or settings
+            val pagesToPersist = pagesSnapshot.filter { page ->
+                val isModified = page.drawingData.isNotEmpty() || 
+                                 page.textData.isNotEmpty() || 
+                                 page.imageData.isNotEmpty() || 
+                                 page.audioData.isNotEmpty() || 
+                                 page.paperStyle != 0 || 
+                                 page.canvasColor != -1
+                
+                // If it's a PDF page, we only save if it's been modified
+                val isPdfPage = noteToSave.pdfPath != null && page.backgroundUri?.startsWith(noteToSave.pdfPath) == true
+                
+                if (isPdfPage) isModified else true
+            }.mapIndexed { index, page -> 
+                page.copy(pageId = 0, noteId = noteId) 
+            }
+            
+            // ATOMIC TRANSACTION: Delete all and re-insert only modified pages
+            dao.updatePagesAtomic(noteId, pagesToPersist)
         }
     }
 
@@ -622,27 +776,43 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
                     val pageCount = result.second
                     
                     if (currentScreen == 0) {
-                        // Creating a fresh note from main screen
+                        // VIRTUAL PAGINATION: Instant import for main screen
                         commitSelection()
                         selectedNoteWithPages = null
                         currentTitle = pdfName
+                        
+                        // Create 3000 virtual pages in memory instantly
+                        val newPages = (0 until pageCount).map { i ->
+                            PageEntity(noteId = 0, pageNumber = i, backgroundUri = "$pdfPath?pdfPage=$i")
+                        }
                         currentPages.clear()
-                        for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = 0, pageNumber = i, backgroundUri = "$pdfPath?pdfPage=$i"))
+                        currentPages.addAll(newPages)
+                        
+                        // Save the note with PDF metadata so future loads are instant
+                        saveCurrentNoteToDb(
+                            date = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date()),
+                            titleOverride = pdfName,
+                            noteOverride = Note(
+                                title = pdfName,
+                                content = "",
+                                date = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date()),
+                                pdfPath = pdfPath,
+                                pdfPageCount = pageCount
+                            )
+                        )
+                        
                         activePageIndex = 0
                         isCurrentNoteInfinite = false
                         currentScreen = 1
                     } else {
-                        // Importing into existing note/editor session
+                        // Still support appending to existing notes (this might be slower but consistent)
                         commitSelection()
-                        if (isNoteBlank()) {
-                            currentTitle = pdfName; currentPages.clear()
-                            for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = i, backgroundUri = "$pdfPath?pdfPage=$i"))
-                            activePageIndex = 0
-                        } else {
-                            val startIdx = currentPages.size
-                            for (i in 0 until pageCount) currentPages.add(PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = startIdx + i, backgroundUri = "$pdfPath?pdfPage=$i"))
-                            activePageIndex = currentPages.lastIndex
+                        val startIdx = currentPages.size
+                        val newPages = (0 until pageCount).map { i ->
+                            PageEntity(noteId = selectedNoteWithPages?.note?.id ?: 0, pageNumber = startIdx + i, backgroundUri = "$pdfPath?pdfPage=$i")
                         }
+                        currentPages.addAll(newPages)
+                        activePageIndex = currentPages.lastIndex
                     }
                 }
                 isImportingPdf = false
@@ -726,6 +896,27 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
     fun clickHaptic() {
         com.midknight.pixelnotes.domain.HapticManager(context).click()
     }
+    
+    fun hydrateNoteWithPages(noteWP: NoteWithPages): NoteWithPages {
+        if (noteWP.note.pdfPath == null || noteWP.note.pdfPageCount <= 0) return noteWP
+        
+        val pdfPath = noteWP.note.pdfPath
+        val count = noteWP.note.pdfPageCount
+        val existingPages = noteWP.pages.associateBy { it.pageNumber }
+        
+        // Find the maximum page number to handle appended pages
+        val maxPageNum = maxOf(count - 1, noteWP.pages.maxOfOrNull { it.pageNumber } ?: 0)
+        
+        val fullPages = (0..maxPageNum).map { i ->
+            existingPages[i] ?: PageEntity(
+                noteId = noteWP.note.id,
+                pageNumber = i,
+                backgroundUri = if (i < count) "$pdfPath?pdfPage=$i" else null
+            )
+        }
+        return noteWP.copy(pages = fullPages)
+    }
+
     fun moveSelectedNotes(newFolder: String) { viewModelScope.launch { selectedNotes.forEach { dao.updateNote(it.note.copy(folder = newFolder)) }; clearSelection() } }
     fun createFolder(name: String, parentPath: String?) { val path = if (parentPath == null) name else "$parentPath/$name"; viewModelScope.launch { dao.insertFolder(FolderEntity(path = path, name = name, parentPath = parentPath)) } }
     fun renameFolder(oldPath: String, newName: String) { val parentPath = oldPath.substringBeforeLast('/', ""); val newPath = if (parentPath.isEmpty()) newName else "$parentPath/$newName"; viewModelScope.launch { dao.renameFoldersCascade(oldPath, newPath, newName); dao.renameNotesFolderCascade(oldPath, newPath); if (currentFolderFilter == oldPath || currentFolderFilter.startsWith("$oldPath/")) currentFolderFilter = newPath + currentFolderFilter.removePrefix(oldPath) } }
@@ -897,7 +1088,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         val page = currentPages[pageIndex]
         val audioToDelete = page.audioData.find { it.id == audioId } ?: return
         currentPages[pageIndex] = page.copy(audioData = page.audioData.filter { it.id != audioId })
-        undoStack.add(EditorAction(pageIndex, null, null, null, audioToDelete, false))
+        undoStack.add(EditorAction(pageIndex, audios = listOf(audioToDelete), isAdd = false))
         redoStack.clear()
         if (activeAudioUri == audioToDelete.uri) stopAudio()
     }
@@ -917,8 +1108,8 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
             selectedTexts[selectedIdx] = updatedText
         }
 
-        undoStack.add(EditorAction(pageIndex, null, oldText, null, null, false))
-        undoStack.add(EditorAction(pageIndex, null, updatedText, null, null, true))
+        undoStack.add(EditorAction(pageIndex, texts = listOf(oldText), isAdd = false))
+        undoStack.add(EditorAction(pageIndex, texts = listOf(updatedText), isAdd = true))
         redoStack.clear()
     }
 
@@ -926,7 +1117,7 @@ class NotesViewModel(private val dao: NoteDao, private val context: android.cont
         if (pageIndex !in currentPages.indices) return
         val page = currentPages[pageIndex]
         currentPages[pageIndex] = page.copy(audioData = page.audioData + audio)
-        undoStack.add(EditorAction(pageIndex, null, null, null, audio, true))
+        undoStack.add(EditorAction(pageIndex, audios = listOf(audio), isAdd = true))
         redoStack.clear()
     }
 

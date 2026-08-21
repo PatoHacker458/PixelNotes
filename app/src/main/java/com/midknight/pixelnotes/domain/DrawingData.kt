@@ -1,5 +1,6 @@
 package com.midknight.pixelnotes.domain
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Path
 
@@ -13,7 +14,24 @@ data class StrokeData(
     val isHighlighter: Boolean = false,
     val shapeType: Int = 0
 ) {
+    @Transient
+    private var memoizedPath: Path? = null
+    
+    @Transient
+    private var memoizedBounds: Rect? = null
+
+    @Transient
+    private var memoizedPressurePath: Path? = null
+
+    fun invalidateCache() {
+        memoizedPath = null
+        memoizedBounds = null
+        memoizedPressurePath = null
+    }
+
     fun toPath(): Path {
+        memoizedPath?.let { return it }
+        
         val path = Path()
         if (points.isEmpty()) return path
 
@@ -33,16 +51,134 @@ data class StrokeData(
                 val midX = (prevX + currentX) / 2f
                 val midY = (prevY + currentY) / 2f
 
-                path.quadraticBezierTo(prevX, prevY, midX, midY)
+                path.quadraticTo(prevX, prevY, midX, midY)
                 prevX = currentX
                 prevY = currentY
             }
             path.lineTo(prevX, prevY)
         }
+        
+        memoizedPath = path
+        return path
+    }
+
+    fun toPressurePath(): Path {
+        memoizedPressurePath?.let { return it }
+        
+        val path = Path()
+        
+        val filtered = mutableListOf<PointData>()
+        if (points.isNotEmpty()) {
+            filtered.add(points[0])
+            for (i in 1 until points.size) {
+                val p1 = points[i-1]
+                val p2 = points[i]
+                // Only add points that have moved enough to have a direction
+                if (kotlin.math.hypot(p2.x - p1.x, p2.y - p1.y) > 0.001f || i == points.size - 1) {
+                    filtered.add(p2)
+                }
+            }
+        }
+
+        if (filtered.size < 2) {
+            if (filtered.size == 1) {
+                val p = filtered[0]
+                val r = (strokeWidth * (if (p.p <= 0.2f) 0.2f else p.p)) / 2f
+                path.addOval(Rect(p.x - r, p.y - r, p.x + r, p.y + r))
+            }
+            memoizedPressurePath = path
+            return path
+        }
+
+        val leftPoints = mutableListOf<Offset>()
+        val rightPoints = mutableListOf<Offset>()
+        
+        var lastNx = 0f
+        var lastNy = 0f
+
+        for (i in filtered.indices) {
+            val curr = filtered[i]
+            val prev = if (i > 0) filtered[i - 1] else null
+            val next = if (i < filtered.size - 1) filtered[i + 1] else null
+
+            var dx: Float
+            var dy: Float
+            
+            if (prev != null && next != null) {
+                dx = next.x - prev.x
+                dy = next.y - prev.y
+            } else if (next != null) {
+                dx = next.x - curr.x
+                dy = next.y - curr.y
+            } else {
+                dx = curr.x - prev!!.x
+                dy = curr.y - prev.y
+            }
+
+            val mag = kotlin.math.hypot(dx, dy)
+            
+            val nx: Float
+            val ny: Float
+            
+            if (mag > 0.000001f) {
+                nx = -dy / mag
+                ny = dx / mag
+                lastNx = nx
+                lastNy = ny
+            } else {
+                nx = lastNx
+                ny = lastNy
+            }
+
+            // More generous pressure: ensure USI 2.0 low pressure is still very visible
+            val pressureValue = if (curr.p <= 0.1f) 0.3f else if (curr.p < 0.2f) 0.4f else curr.p
+            val r = (strokeWidth * pressureValue) / 2f
+
+            leftPoints.add(Offset(curr.x + nx * r, curr.y + ny * r))
+            rightPoints.add(Offset(curr.x - nx * r, curr.y - ny * r))
+        }
+
+        if (leftPoints.isEmpty() || rightPoints.isEmpty()) return path
+
+        path.moveTo(leftPoints[0].x, leftPoints[0].y)
+        for (i in 1 until leftPoints.size) {
+            val p = leftPoints[i]
+            val prev = leftPoints[i-1]
+            val midX = (p.x + prev.x) / 2f
+            val midY = (p.y + prev.y) / 2f
+            path.quadraticTo(prev.x, prev.y, midX, midY)
+        }
+        path.lineTo(leftPoints.last().x, leftPoints.last().y)
+
+        val rp = rightPoints.reversed()
+        path.lineTo(rp[0].x, rp[0].y)
+        for (i in 1 until rp.size) {
+            val p = rp[i]
+            val prev = rp[i-1]
+            val midX = (p.x + prev.x) / 2f
+            val midY = (p.y + prev.y) / 2f
+            path.quadraticTo(prev.x, prev.y, midX, midY)
+        }
+        path.lineTo(rp.last().x, rp.last().y)
+        
+        path.close()
+        
+        // Add rounded caps for low point counts or start/end
+        val startP = filtered.first()
+        val startR = (strokeWidth * (if (startP.p <= 0.1f) 0.3f else startP.p)) / 2f
+        path.addOval(Rect(startP.x - startR, startP.y - startR, startP.x + startR, startP.y + startR))
+        
+        val endP = filtered.last()
+        val endR = (strokeWidth * (if (endP.p <= 0.1f) 0.3f else endP.p)) / 2f
+        path.addOval(Rect(endP.x - endR, endP.y - endR, endP.x + endR, endP.y + endR))
+
+        memoizedPressurePath = path
         return path
     }
 
     fun getBounds(): Rect {
+        memoizedBounds?.let { return it }
+        
         if (points.isEmpty()) return Rect.Zero
         var minX = Float.MAX_VALUE
         var minY = Float.MAX_VALUE
@@ -54,7 +190,9 @@ data class StrokeData(
             if (it.y < minY) minY = it.y
             if (it.y > maxY) maxY = it.y
         }
-        return Rect(minX, minY, maxX, maxY)
+        val bounds = Rect(minX, minY, maxX, maxY)
+        memoizedBounds = bounds
+        return bounds
     }
 
     fun translate(dx: Float, dy: Float): StrokeData {

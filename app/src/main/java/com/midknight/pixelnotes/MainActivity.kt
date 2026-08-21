@@ -13,10 +13,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.AlertDialog
@@ -33,10 +36,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.core.content.FileProvider
@@ -92,7 +98,8 @@ class MainActivity : ComponentActivity() {
                     uri?.let {
                         coroutineScope.launch {
                             val exporter = PdfExporter(context)
-                            exporter.exportToPdf(viewModel.selectedNotes.toList(), it)
+                            val hydratedNotes = viewModel.selectedNotes.map { viewModel.hydrateNoteWithPages(it) }
+                            exporter.exportToPdf(hydratedNotes, it)
                             viewModel.clearSelection()
                             Toast.makeText(context, "Exported Merged PDF", Toast.LENGTH_SHORT).show()
                         }
@@ -133,11 +140,16 @@ class MainActivity : ComponentActivity() {
                                   viewModel.currentFolderFilter != "All Notes" || 
                                   viewModel.selectedNotes.isNotEmpty() || 
                                   viewModel.selectedFolders.isNotEmpty() ||
+                                  viewModel.showFabMenu ||
                                   drawerState.isOpen
 
                 PredictiveBackHandler(enabled = backEnabled) { progressFlow ->
                     if (drawerState.isOpen) {
                         try { progressFlow.collect { }; coroutineScope.launch { drawerState.close() } } catch (e: CancellationException) { }
+                        return@PredictiveBackHandler
+                    }
+                    if (viewModel.showFabMenu) {
+                        try { progressFlow.collect { }; viewModel.showFabMenu = false } catch (e: CancellationException) { }
                         return@PredictiveBackHandler
                     }
                     if (viewModel.selectedNotes.isNotEmpty() || viewModel.selectedFolders.isNotEmpty()) {
@@ -170,14 +182,61 @@ class MainActivity : ComponentActivity() {
 
                 if (viewModel.showDeleteDialog) {
                     val isTrash = viewModel.currentFolderFilter == "Trash"
+                    val selectedNotesCount = viewModel.selectedNotes.size
+                    val selectedFoldersCount = viewModel.selectedFolders.size
+                    
+                    val title: String
+                    val bodyText: String
+                    val confirmText: String
+                    
+                    if (isTrash) {
+                        title = "Delete Permanently"
+                        confirmText = "Delete"
+                        val itemsText = buildString {
+                            if (selectedNotesCount > 0) append("$selectedNotesCount note${if (selectedNotesCount > 1) "s" else ""}")
+                            if (selectedNotesCount > 0 && selectedFoldersCount > 0) append(" and ")
+                            if (selectedFoldersCount > 0) append("$selectedFoldersCount folder${if (selectedFoldersCount > 1) "s" else ""}")
+                        }
+                        bodyText = "These $itemsText will be deleted forever."
+                    } else if (selectedFoldersCount > 0) {
+                        title = "Delete Folders"
+                        confirmText = "Delete"
+                        if (selectedFoldersCount == 1 && selectedNotesCount == 0) {
+                            val folderName = viewModel.selectedFolders.first().name
+                            bodyText = "Delete '$folderName' and all its contents?"
+                        } else {
+                            val itemsText = buildString {
+                                append("$selectedFoldersCount folder${if (selectedFoldersCount > 1) "s" else ""}")
+                                if (selectedNotesCount > 0) append(" and $selectedNotesCount individual note${if (selectedNotesCount > 1) "s" else ""}")
+                            }
+                            bodyText = "Delete $itemsText and all their contents?"
+                        }
+                    } else {
+                        title = "Move to Trash"
+                        confirmText = "Move"
+                        bodyText = "Move $selectedNotesCount note${if (selectedNotesCount > 1) "s" else ""} to the trash?"
+                    }
+
                     AlertDialog(
                         onDismissRequest = { viewModel.showDeleteDialog = false },
-                        title = { Text(if (isTrash) "Delete Permanently" else "Move to Trash") },
-                        text = { Text(if (isTrash) "These ${viewModel.selectedNotes.size} notes will be deleted forever." else "Move ${viewModel.selectedNotes.size} notes to the trash?") },
+                        title = { Text(title) },
+                        text = { Text(bodyText) },
                         confirmButton = { 
                             ExpressiveButton(
-                                text = if (isTrash) "Delete" else "Move", 
-                                onClick = { if (isTrash) viewModel.permanentlyDeleteSelected() else viewModel.moveToTrash(); viewModel.showDeleteDialog = false },
+                                text = confirmText, 
+                                onClick = { 
+                                    if (isTrash) {
+                                        viewModel.permanentlyDeleteSelected() 
+                                    } else {
+                                        // Cascade folder deletion (includes trashing notes inside)
+                                        viewModel.selectedFolders.forEach { folder ->
+                                            viewModel.deleteFolder(folder.path)
+                                        }
+                                        // Trash individual notes that weren't inside selected folders
+                                        viewModel.moveToTrash()
+                                    }
+                                    viewModel.showDeleteDialog = false 
+                                },
                                 containerColor = MaterialTheme.colorScheme.error,
                                 contentColor = MaterialTheme.colorScheme.onError,
                                 isSquareEdge = true
@@ -255,7 +314,8 @@ class MainActivity : ComponentActivity() {
                                     viewModel.showShareDialog = false
                                     coroutineScope.launch {
                                         val exporter = PdfExporter(context)
-                                        val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "PixelNotes_Merged.pdf")
+                                        val hydratedNotes = viewModel.selectedNotes.map { viewModel.hydrateNoteWithPages(it) }
+                                        val file = exporter.exportToSharedFile(hydratedNotes, "PixelNotes_Merged.pdf")
                                         file?.let {
                                             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
                                             val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -274,7 +334,8 @@ class MainActivity : ComponentActivity() {
                                     viewModel.showShareDialog = false
                                     coroutineScope.launch {
                                         val exporter = PdfExporter(context)
-                                        val files = exporter.exportToSharedFiles(viewModel.selectedNotes.toList())
+                                        val hydratedNotes = viewModel.selectedNotes.map { viewModel.hydrateNoteWithPages(it) }
+                                        val files = exporter.exportToSharedFiles(hydratedNotes)
                                         val uris = ArrayList<Uri>(files.map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) })
                                         val shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply { type = "application/pdf"; putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                                         context.startActivity(Intent.createChooser(shareIntent, "Share Separate PDFs"))
@@ -304,13 +365,27 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (viewModel.isSyncing) {
+                if (viewModel.isSyncing || viewModel.isSaving || viewModel.isImportingPdf) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .zIndex(100f)
+                            .zIndex(1000f)
+                            .background(Color.Black.copy(alpha = 0.3f))
+                            .pointerInput(Unit) {}, // Block all input
+                        contentAlignment = Alignment.Center
                     ) {
-                        com.midknight.pixelnotes.ui.components.MorphingLoader()
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            com.midknight.pixelnotes.ui.components.MorphingLoader()
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = if (viewModel.isSyncing) "Syncing..." 
+                                       else if (viewModel.isImportingPdf) "Importing PDF..." 
+                                       else "Saving...",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 
@@ -373,7 +448,8 @@ class MainActivity : ComponentActivity() {
                                             if (viewModel.selectedNotes.size == 1) {
                                                 coroutineScope.launch {
                                                     val exporter = PdfExporter(context)
-                                                    val file = exporter.exportToSharedFile(viewModel.selectedNotes.toList(), "${viewModel.selectedNotes.first().note.title}.pdf")
+                                                    val hydratedNote = viewModel.hydrateNoteWithPages(viewModel.selectedNotes.first())
+                                                    val file = exporter.exportToSharedFile(listOf(hydratedNote), "${hydratedNote.note.title}.pdf")
                                                     file?.let {
                                                         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
                                                         val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/pdf"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -394,7 +470,16 @@ class MainActivity : ComponentActivity() {
                                         onImportPdf = { pdfImportLauncher.launch("application/pdf") },
                                         viewModel = viewModel
                                     )
-                                    1 -> DrawingScreen(viewModel = viewModel)
+                                    1 -> DrawingScreen(
+                                        viewModel = viewModel,
+                                        onBack = {
+                                            if (viewModel.navigateBack()) {
+                                                coroutineScope.launch {
+                                                    transitionState.animateTo(viewModel.currentScreen)
+                                                }
+                                            }
+                                        }
+                                    )
                                     2 -> SettingsScreen(viewModel = viewModel)
                                 }
                             }

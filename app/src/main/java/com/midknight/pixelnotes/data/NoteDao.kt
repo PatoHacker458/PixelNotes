@@ -10,73 +10,79 @@ import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface NoteDao {
+abstract class NoteDao {
     @Transaction
     @Query("SELECT * FROM notes ORDER BY id DESC")
-    fun getAllNotesWithPages(): Flow<List<NoteWithPages>>
+    abstract fun getAllNotesWithPages(): Flow<List<NoteWithPages>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertNote(note: Note): Long
+    abstract suspend fun insertNote(note: Note): Long
 
     @Update
-    suspend fun updateNote(note: Note): Int
+    abstract suspend fun updateNote(note: Note): Int
 
     @Delete
-    suspend fun deleteNote(note: Note): Int
+    abstract suspend fun deleteNote(note: Note): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPage(page: PageEntity): Long
+    abstract suspend fun insertPage(page: PageEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPages(pages: List<PageEntity>): List<Long>
+    abstract suspend fun insertPages(pages: List<PageEntity>): List<Long>
 
     @Update
-    suspend fun updatePage(page: PageEntity): Int
+    abstract suspend fun updatePage(page: PageEntity): Int
 
     @Delete
-    suspend fun deletePage(page: PageEntity): Int
+    abstract suspend fun deletePage(page: PageEntity): Int
 
     @Query("DELETE FROM pages WHERE noteId = :noteId")
-    suspend fun deletePagesByNoteId(noteId: Int): Int
+    abstract suspend fun deletePagesByNoteId(noteId: Int): Int
+
+    @Transaction
+    open suspend fun updatePagesAtomic(noteId: Int, pages: List<PageEntity>) {
+        deletePagesByNoteId(noteId)
+        pages.chunked(100).forEach { insertPages(it) }
+    }
 
     @Query("SELECT * FROM folders ORDER BY path ASC")
-    fun getAllFolders(): Flow<List<FolderEntity>>
+    abstract fun getAllFolders(): Flow<List<FolderEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertFolder(folder: FolderEntity): Long
+    abstract suspend fun insertFolder(folder: FolderEntity): Long
 
     @Query("UPDATE folders SET path = :newPath || SUBSTR(path, LENGTH(:oldPath) + 1), name = CASE WHEN path = :oldPath THEN :newName ELSE name END WHERE path = :oldPath OR path LIKE :oldPath || '/%'")
-    suspend fun renameFoldersCascade(oldPath: String, newPath: String, newName: String): Int
+    abstract suspend fun renameFoldersCascade(oldPath: String, newPath: String, newName: String): Int
 
     @Query("UPDATE notes SET folder = :newPath || SUBSTR(folder, LENGTH(:oldPath) + 1) WHERE folder = :oldPath OR folder LIKE :oldPath || '/%'")
-    suspend fun renameNotesFolderCascade(oldPath: String, newPath: String): Int
+    abstract suspend fun renameNotesFolderCascade(oldPath: String, newPath: String): Int
 
     @Query("DELETE FROM folders WHERE path = :path OR path LIKE :path || '/%'")
-    suspend fun deleteFolderCascade(path: String): Int
+    abstract suspend fun deleteFolderCascade(path: String): Int
 
     @Query("UPDATE notes SET inTrash = 1 WHERE folder = :path OR folder LIKE :path || '/%'")
-    suspend fun trashNotesInFolderCascade(path: String): Int
+    abstract suspend fun trashNotesInFolderCascade(path: String): Int
 
     @Transaction
     @Query("SELECT * FROM notes")
-    suspend fun getNotesWithPagesSync(): List<NoteWithPages>
+    abstract suspend fun getNotesWithPagesSync(): List<NoteWithPages>
 
     @Transaction
     @Query("SELECT * FROM notes WHERE inTrash = 1")
-    suspend fun getTrashedNotesSync(): List<NoteWithPages>
+    abstract suspend fun getTrashedNotesSync(): List<NoteWithPages>
 
     @Delete
-    suspend fun deleteFolder(folder: FolderEntity): Int
+    abstract suspend fun deleteFolder(folder: FolderEntity): Int
 
     @Query("SELECT * FROM custom_fonts ORDER BY name ASC")
-    fun getAllCustomFonts(): Flow<List<CustomFont>>
+    abstract fun getAllCustomFonts(): Flow<List<CustomFont>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertCustomFont(font: CustomFont): Long
+    abstract suspend fun insertCustomFont(font: CustomFont): Long
 
     @Delete
-    suspend fun deleteCustomFont(font: CustomFont): Int
+    abstract suspend fun deleteCustomFont(font: CustomFont): Int
 
     @Query("SELECT MAX(updatedAt) FROM notes")
-    suspend fun getLastUpdatedTimestamp(): Long?
+    abstract suspend fun getLastUpdatedTimestamp(): Long?
 }

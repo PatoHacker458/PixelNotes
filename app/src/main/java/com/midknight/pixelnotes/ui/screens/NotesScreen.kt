@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -91,8 +93,9 @@ fun NotesScreen(
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
     var newFolderName by remember { mutableStateOf("") }
-    var showFabMenu by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showNewFolderDialog by remember { mutableStateOf(false) }
+    var newFolderNameInput by remember { mutableStateOf("") }
 
     // Selection and Gesture state
     val folderBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -188,6 +191,47 @@ fun NotesScreen(
         )
     }
 
+    if (showNewFolderDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewFolderDialog = false },
+            title = { Text("New Folder") },
+            text = { 
+                OutlinedTextField(
+                    value = newFolderNameInput, 
+                    onValueChange = { newFolderNameInput = it }, 
+                    label = { Text("Folder Name") },
+                    singleLine = true
+                ) 
+            },
+            confirmButton = { 
+                ExpressiveButton(
+                    text = "Create", 
+                    onClick = { 
+                        if (newFolderNameInput.isNotBlank()) {
+                            val parent = if (currentFolder == "All Notes" || currentFolder == "Trash") null else currentFolder
+                            viewModel.createFolder(newFolderNameInput, parent)
+                        }
+                        showNewFolderDialog = false
+                        newFolderNameInput = ""
+                    },
+                    isSquareEdge = true
+                )
+            },
+            dismissButton = { 
+                ExpressiveButton(
+                    text = "Cancel", 
+                    onClick = { 
+                        showNewFolderDialog = false 
+                        newFolderNameInput = ""
+                    },
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    isSquareEdge = true
+                )
+            }
+        )
+    }
+
     if (viewModel.showEmptyTrashDialog) {
         AlertDialog(
             onDismissRequest = { viewModel.showEmptyTrashDialog = false },
@@ -228,16 +272,16 @@ fun NotesScreen(
         folders.filter { it.parentPath == (if (currentFolder == "All Notes") null else currentFolder) }
     } else emptyList()
 
-    // Clear bounds when content changes to prevent phantom selections
     LaunchedEffect(displayedNotes, displayedFolders) {
         noteBounds.clear()
         folderBounds.clear()
     }
 
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
         topBar = {
             Box(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp)) {
-                androidx.compose.animation.AnimatedVisibility(
+                AnimatedVisibility(
                     visible = selectedNotes.isEmpty() && viewModel.selectedFolders.isEmpty(),
                     enter = fadeIn(tween(300)),
                     exit = fadeOut(tween(300))
@@ -246,12 +290,12 @@ fun NotesScreen(
                         modifier = Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)).padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        ExpressiveIconButton(icon = Icons.Default.Menu, contentDescription = "Menu", onClick = onMenuClick)
+                        ExpressiveIconButton(icon = Icons.Default.Menu, contentDescription = "Menu", tooltip = "Menu", onClick = onMenuClick)
                         
                         TextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Search your notes...") },
+                            placeholder = { Text(if (currentFolder == "All Notes" || currentFolder == "Trash") "Search your notes..." else "Search in ${currentFolder.substringAfterLast("/")}") },
                             modifier = Modifier.weight(1f),
                             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
@@ -282,8 +326,7 @@ fun NotesScreen(
                     }
                 }
 
-                // CONTEXTUAL SELECTION BAR
-                androidx.compose.animation.AnimatedVisibility(
+                AnimatedVisibility(
                     visible = selectedNotes.isNotEmpty() || viewModel.selectedFolders.isNotEmpty(),
                     enter = fadeIn(tween(300)),
                     exit = fadeOut(tween(300))
@@ -295,6 +338,7 @@ fun NotesScreen(
                         ExpressiveIconButton(
                             icon = Icons.Default.Close,
                             contentDescription = "Clear Selection",
+                            tooltip = "Clear Selection",
                             onClick = onClearSelection,
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -308,18 +352,18 @@ fun NotesScreen(
                         )
                         
                         if (currentFolder == "Trash") {
-                            ExpressiveIconButton(icon = Icons.Default.Restore, contentDescription = "Restore", onClick = onActionRestore, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                            ExpressiveIconButton(icon = Icons.Default.DeleteForever, contentDescription = "Delete Permanently", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.Restore, contentDescription = "Restore", tooltip = "Restore", onClick = onActionRestore, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.DeleteForever, contentDescription = "Delete Permanently", tooltip = "Delete Permanently", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                         } else {
                             if (selectedNotes.size == 1 && viewModel.selectedFolders.isEmpty()) {
-                                ExpressiveIconButton(icon = Icons.Default.FileUpload, contentDescription = "Export .pxnote", onClick = { onExportPxNote(selectedNotes.first()) }, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                                ExpressiveIconButton(icon = Icons.Default.FileUpload, contentDescription = "Export .pxnote", tooltip = "Export .pxnote", onClick = { onExportPxNote(selectedNotes.first()) }, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
                             if (viewModel.selectedFolders.isEmpty()) {
-                                ExpressiveIconButton(icon = Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move", onClick = onActionMove, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                                ExpressiveIconButton(icon = Icons.Default.PictureAsPdf, contentDescription = "Merge PDF", onClick = onActionExport, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
-                                ExpressiveIconButton(icon = Icons.Default.Share, contentDescription = "Share", onClick = onActionShare, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                                ExpressiveIconButton(icon = Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Move", tooltip = "Move", onClick = onActionMove, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                                ExpressiveIconButton(icon = Icons.Default.PictureAsPdf, contentDescription = "Merge PDF", tooltip = "Merge PDF", onClick = onActionExport, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                                ExpressiveIconButton(icon = Icons.Default.Share, contentDescription = "Share", tooltip = "Share", onClick = onActionShare, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
-                            ExpressiveIconButton(icon = Icons.Default.Delete, contentDescription = "Trash", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                            ExpressiveIconButton(icon = Icons.Default.Delete, contentDescription = "Trash", tooltip = "Trash", onClick = onActionDelete, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                         }
                     }
                 }
@@ -329,51 +373,87 @@ fun NotesScreen(
             if (currentFolder == "Trash" && displayedNotes.isNotEmpty()) {
                 ExpressiveFAB(
                     icon = Icons.Default.DeleteSweep,
+                    tooltip = "Empty Trash",
                     onClick = { viewModel.showEmptyTrashDialog = true },
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
                 )
             } else if (selectedNotes.isEmpty() && viewModel.selectedFolders.isEmpty()) {
                 Column(horizontalAlignment = Alignment.End) {
-                    AnimatedVisibility(visible = showFabMenu) {
-                        Column(modifier = Modifier.padding(bottom = 16.dp), horizontalAlignment = Alignment.End) {
-                            ExpressiveIconButton(
-                                icon = Icons.Default.FileOpen,
-                                contentDescription = "Import .pxnote",
-                                onClick = { showFabMenu = false; onImportPxNote() },
-                                modifier = Modifier.padding(bottom = 8.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                size = 56.dp
-                            )
-                            ExpressiveIconButton(
-                                icon = Icons.Default.PictureAsPdf,
-                                contentDescription = "Import PDF",
-                                onClick = { showFabMenu = false; onImportPdf() },
-                                modifier = Modifier.padding(bottom = 8.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                size = 56.dp
-                            )
+                    AnimatedVisibility(
+                        visible = viewModel.showFabMenu,
+                        enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.8f, transformOrigin = TransformOrigin(1f, 1f)) + slideInVertically { it / 4 },
+                        exit = fadeOut(tween(300)) + scaleOut(targetScale = 0.8f, transformOrigin = TransformOrigin(1f, 1f)) + slideOutVertically { it / 4 }
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .padding(bottom = 16.dp)
+                                .width(IntrinsicSize.Min)
+                                .clip(RoundedCornerShape(32.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+                                .padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // Section: Creation
                             ExpressiveIconButton(
                                 icon = Icons.Default.Description,
                                 contentDescription = "A4 Note",
-                                onClick = { showFabMenu = false; onCreateNewNote(false) },
-                                modifier = Modifier.padding(bottom = 8.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                tooltip = "A4 Note",
+                                onClick = { viewModel.showFabMenu = false; onCreateNewNote(false) },
+                                containerColor = Color.Transparent,
                                 size = 56.dp
                             )
                             ExpressiveIconButton(
                                 icon = Icons.Default.AllOut,
                                 contentDescription = "Infinite Canvas",
-                                onClick = { showFabMenu = false; onCreateNewNote(true) },
-                                modifier = Modifier.padding(bottom = 8.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                tooltip = "Infinite Canvas",
+                                onClick = { viewModel.showFabMenu = false; onCreateNewNote(true) },
+                                containerColor = Color.Transparent,
+                                size = 56.dp
+                            )
+                            
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+
+                            // Section: Imports
+                            ExpressiveIconButton(
+                                icon = Icons.Default.FileOpen,
+                                contentDescription = "Import .pxnote",
+                                tooltip = "Import .pxnote",
+                                onClick = { viewModel.showFabMenu = false; onImportPxNote() },
+                                containerColor = Color.Transparent,
+                                size = 56.dp
+                            )
+                            ExpressiveIconButton(
+                                icon = Icons.Default.PictureAsPdf,
+                                contentDescription = "Import PDF",
+                                tooltip = "Import PDF",
+                                onClick = { viewModel.showFabMenu = false; onImportPdf() },
+                                containerColor = Color.Transparent,
+                                size = 56.dp
+                            )
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+
+                            // Section: Organization
+                            ExpressiveIconButton(
+                                icon = Icons.Default.CreateNewFolder,
+                                contentDescription = "New Folder",
+                                tooltip = "New Folder",
+                                onClick = { viewModel.showFabMenu = false; showNewFolderDialog = true },
+                                containerColor = Color.Transparent,
                                 size = 56.dp
                             )
                         }
                     }
                     ExpressiveFAB(
-                        icon = if (showFabMenu) Icons.Default.Close else Icons.Default.Add,
-                        onClick = { showFabMenu = !showFabMenu },
+                        icon = if (viewModel.showFabMenu) Icons.Default.Close else Icons.Default.Add,
+                        onClick = { viewModel.showFabMenu = !viewModel.showFabMenu },
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
@@ -383,6 +463,18 @@ fun NotesScreen(
     ) { paddingValues ->
         BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             val fullHeight = this.constraints.maxHeight.toFloat()
+            
+            if (viewModel.showFabMenu) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures { viewModel.showFabMenu = false }
+                        }
+                        .zIndex(10f)
+                )
+            }
+
             Box(modifier = Modifier.fillMaxSize()
                 .onGloballyPositioned { containerPositionInWindow = it.positionInWindow() }
                 .pointerInput(displayedNotes, displayedFolders) {
